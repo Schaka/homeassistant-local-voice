@@ -17,13 +17,16 @@ Run:
 """
 import argparse
 import asyncio
+import contextlib
 import ctypes
+import fcntl
 import io
 import json
 import logging
 import os
 import signal
 import threading
+import time
 import urllib.request
 import wave
 from pathlib import Path
@@ -57,6 +60,44 @@ _CHUNK_SAMPLES = 4096
 # restart (podman --restart unless-stopped brings it back with fresh contexts).
 _GPU_FAULT_SIGNS = ("device lost", "devicelost", "context is lost", "http error 500")
 _GPU_FAULT_THRESHOLD = 3
+
+
+class GpuLock:
+    """Serializes ALL GPU work (STT + TTS) to one in-flight operation.
+
+    The R7 250 (Oland) has two independent Vulkan contexts (parakeet.cpp in
+    this process, audiocpp_server in another) and a shared ~2s amdgpu scheduler
+    timeout; concurrent kernels from both can trip a GPU reset. This file lock
+    is taken around every GPU call so STT and TTS never overlap on the device.
+    A fresh fd per acquisition keeps flock semantics correct within one process.
+    """
+
+    def __init__(self, path: str = "/tmp/gpu.lock", timeout: float = 20.0):
+        self._path = path
+        self._timeout = timeout
+
+    @contextlib.contextmanager
+    def held(self):
+        fd = open(self._path, "w")
+        deadline = time.monotonic() + self._timeout
+        try:
+            while True:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except OSError:
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError(
+                            "GPU busy (previous STT/TTS request still running)"
+                        )
+                    time.sleep(0.05)
+            yield
+        finally:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            except OSError:
+                pass
+            fd.close()
 
 
 class GpuFaultDetector:
@@ -94,12 +135,13 @@ class GpuFaultDetector:
 class ParakeetSTT:
     """Thread-safe wrapper around a single resident parakeet.cpp context."""
 
-    def __init__(self, lib_path: Path, model_path: Path, device: str):
+    def __init__(self, lib_path: Path, model_path: Path, device: str, gpu_lock: GpuLock):
         os.environ["PARAKEET_DEVICE"] = device
         if not lib_path.is_file():
             raise RuntimeError(f"libparakeet not found: {lib_path}")
         if not model_path.is_file():
             raise RuntimeError(f"model not found: {model_path}")
+        self._gpu_lock = gpu_lock
 
         self._lib = ctypes.CDLL(str(lib_path))
         lib = self._lib
@@ -133,13 +175,14 @@ class ParakeetSTT:
         if samples.size == 0:
             return ""
         with self._lock:
-            result = self._lib.parakeet_capi_transcribe_pcm(
-                self._ctx,
-                samples.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
-                len(samples),
-                _RATE,
-                0,
-            )
+            with self._gpu_lock.held():
+                result = self._lib.parakeet_capi_transcribe_pcm(
+                    self._ctx,
+                    samples.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
+                    len(samples),
+                    _RATE,
+                    0,
+                )
             if not result:
                 err = self._lib.parakeet_capi_last_error(self._ctx)
                 raise RuntimeError((err or b"").decode(errors="replace"))
@@ -153,10 +196,11 @@ class ParakeetSTT:
 # TTS: audio.cpp via audiocpp_server REST
 # ---------------------------------------------------------------------------
 class AudioCppTTS:
-    def __init__(self, base_url: str, model_id: str, default_voice: str):
+    def __init__(self, base_url: str, model_id: str, default_voice: str, gpu_lock: GpuLock):
         self._base_url = base_url.rstrip("/")
         self._model_id = model_id
         self._default_voice = default_voice
+        self._gpu_lock = gpu_lock
         self._health_url = f"{self._base_url}/health"
         self._speech_url = f"{self._base_url}/v1/audio/speech"
 
@@ -177,8 +221,9 @@ class AudioCppTTS:
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=120) as resp:
-            return resp.read()
+        with self._gpu_lock.held():
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                return resp.read()
 
 
 def _parse_wav(data: bytes) -> tuple[int, int, int, bytes]:
@@ -374,8 +419,9 @@ async def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
-    stt = ParakeetSTT(Path(args.stt_lib), Path(args.stt_model), args.stt_device)
-    tts = AudioCppTTS(args.audio_cpp_url, args.tts_model_id, args.tts_voice)
+    gpu_lock = GpuLock()
+    stt = ParakeetSTT(Path(args.stt_lib), Path(args.stt_model), args.stt_device, gpu_lock)
+    tts = AudioCppTTS(args.audio_cpp_url, args.tts_model_id, args.tts_voice, gpu_lock)
 
     for _ in range(60):
         if tts.health():
