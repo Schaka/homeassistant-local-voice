@@ -5,7 +5,7 @@ from wyoming.audio import AudioChunk
 from wyoming.event import Event
 
 async def main():
-    async with AsyncTcpClient("127.0.0.1", 10301) as client:
+    async with AsyncTcpClient("127.0.0.1", 10300) as client:
         await client.write_event(Event(type="describe"))
         ev = await client.read_event()
         print("describe ->", ev.type)

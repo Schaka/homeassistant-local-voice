@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# Container entrypoint: one image, three services.
+# Container entrypoint: two processes, one public Wyoming port (10300).
 #   audiocpp_server  (TTS model resident, REST on 127.0.0.1:8100)
-#   wyoming_stt      (STT, tcp 0.0.0.0:10300)
-#   wyoming_tts      (TTS, tcp 0.0.0.0:10301)
+#   wyoming_voice    (STT + TTS, Wyoming on 0.0.0.0:10300)
 set -u
 cd /app
 
@@ -22,13 +21,11 @@ run_one() {
 }
 
 run_one "audiocpp" /usr/local/bin/audiocpp_server --config /app/server.json &
-run_one "wyoming-stt" python3 /app/wyoming_stt.py \
-  --model /models/stt/parakeet-ctc-0.6b-q8_0.gguf \
-  --lib /usr/lib/libparakeet.so \
-  --uri tcp://0.0.0.0:10300 --device "${PARAKEET_DEVICE}" &
-run_one "wyoming-tts" python3 /app/wyoming_tts.py \
-  --uri tcp://0.0.0.0:10301 \
-  --audio-cpp-url http://127.0.0.1:8100 --model-id pocket-tts --voice alba &
+run_one "wyoming-voice" python3 /app/wyoming_voice.py \
+  --uri tcp://0.0.0.0:10300 \
+  --stt-model /models/stt/parakeet-ctc-0.6b-q8_0.gguf \
+  --stt-lib /usr/lib/libparakeet.so --stt-device "${PARAKEET_DEVICE}" \
+  --audio-cpp-url http://127.0.0.1:8100 --tts-model-id pocket-tts --tts-voice alba &
 
 trap 'kill 0' INT TERM
 wait

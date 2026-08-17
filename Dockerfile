@@ -39,8 +39,8 @@ COPY model_specs /app/model_specs
 COPY models/stt /models/stt
 COPY models/pocket-tts /models/pocket-tts
 
-COPY wyoming_stt.py wyoming_tts.py server.json entrypoint.sh /app/
+COPY wyoming_voice.py server.json entrypoint.sh /app/
 RUN chmod +x /app/entrypoint.sh
 
-EXPOSE 10300 10301
+EXPOSE 10300
 ENTRYPOINT ["/app/entrypoint.sh"]

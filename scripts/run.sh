@@ -10,9 +10,8 @@ podman run -d --name wyoming-voice \
   --security-opt label=disable \
   --ipc host \
   -p 10300:10300 \
-  -p 10301:10301 \
   --restart unless-stopped \
   localhost/wyoming-voice:latest
 
-echo "Started. STT on port 10300, TTS on port 10301."
+echo "Started. STT + TTS on port 10300."
 echo "Logs: podman logs -f wyoming-voice"
