@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
-# Download the English STT + TTS models into ./models/ (baked into the image).
-# Re-run after switching quantizations. Sizes are verified.
+# Stage the English STT + TTS models into ./models/ -- for two use cases:
+#   1. Pre-seeding a host directory that gets mounted over /models at runtime
+#      (swap models without rebuilding the image; see README), and
+#   2. local builds that copy models in instead of downloading them in-stage.
+# The Dockerfile downloads the same files itself (with the same URLs as
+# defaults), so this script is optional for the normal build path.
+# Sizes are verified.
 set -eu
 cd "$(dirname "$0")/.."
 

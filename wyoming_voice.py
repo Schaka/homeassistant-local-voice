@@ -348,7 +348,11 @@ class VoiceEventHandler(AsyncEventHandler):
         self._have_audio_start = False
 
 
-def make_info() -> Info:
+def make_info(
+    stt_model_name: str = "parakeet-ctc-0.6b",
+    tts_voice: str = "alba",
+    tts_languages: tuple[str, ...] = ("en",),
+) -> Info:
     return Info(
         asr=[
             AsrProgram(
@@ -361,8 +365,8 @@ def make_info() -> Info:
                 version="0.5.0",
                 models=[
                     AsrModel(
-                        name="parakeet-ctc-0.6b",
-                        description="NVIDIA Parakeet CTC 0.6B (English)",
+                        name=stt_model_name,
+                        description=f"Parakeet (English, {stt_model_name})",
                         attribution=Attribution(
                             name="NVIDIA NeMo", url="https://github.com/NVIDIA-NeMo/NeMo"
                         ),
@@ -385,10 +389,10 @@ def make_info() -> Info:
                 supports_synthesize_streaming=False,
                 voices=[
                     TtsVoice(
-                        name="alba",
-                        description="alba",
+                        name=tts_voice,
+                        description=tts_voice,
                         installed=True,
-                        languages=["en"],
+                        languages=list(tts_languages),
                         version=None,
                         attribution=Attribution(
                             name="Kyutai", url="https://github.com/Kyutai-Labs/pocket-tts"
@@ -408,9 +412,19 @@ async def main() -> None:
     parser.add_argument(
         "--stt-device", default="Vulkan0", help="parakeet.cpp device name"
     )
+    parser.add_argument(
+        "--stt-model-name",
+        default="parakeet-ctc-0.6b",
+        help="Model name advertised to Home Assistant",
+    )
     parser.add_argument("--audio-cpp-url", default="http://127.0.0.1:8100")
     parser.add_argument("--tts-model-id", default="pocket-tts")
     parser.add_argument("--tts-voice", default="alba")
+    parser.add_argument(
+        "--tts-language",
+        default="en",
+        help="Comma-separated BCP-47 languages for the TTS voice",
+    )
     parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
 
@@ -431,7 +445,11 @@ async def main() -> None:
     else:
         raise RuntimeError("audiocpp_server never became healthy")
 
-    info_event = make_info().event()
+    info_event = make_info(
+        args.stt_model_name,
+        args.tts_voice,
+        tuple(l.strip() for l in args.tts_language.split(",") if l.strip()),
+    ).event()
     faults = GpuFaultDetector()
     server = AsyncServer.from_uri(args.uri)
     server_task = asyncio.create_task(

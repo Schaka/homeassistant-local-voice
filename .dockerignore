@@ -1,4 +1,13 @@
+# Build context: only what the Dockerfile needs. Everything else (CI, docs,
+# host-driver leftovers, staged models) is excluded so context + cache stays
+# small and portable.
+.git
+.github
+docs
+scripts
+models
+vk-libs
 tmp
 *.log
 build
-.git
+__pycache__

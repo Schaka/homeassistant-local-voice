@@ -1,45 +1,28 @@
 # Wyoming STT+TTS on an R7 250 2GB (Oland) via Vulkan
 
-One image, one container, two Wyoming services for Home Assistant:
+Everything learned the hard way getting a 10-15 € e-waste GPU to run a
+Home Assistant voice assistant. Now self-contained and released as one image:
+one container, one Wyoming server on one port (10300), advertising both ASR
+and TTS.
 
-| service | port | engine | model | VRAM |
+| service | port | engine | model | VRAM resident |
 |---|---|---|---|---|
 | STT | 10300 | parakeet.cpp (ggml, Vulkan) | Parakeet CTC 0.6B q8_0 (875 MB) | ~0.9 GB |
-| TTS | 10301 | audio.cpp (ggml, Vulkan) | PocketTTS-100M English q8_0 (128 MB) | ~0.5 GB |
+| TTS | 10300 | audio.cpp (ggml, Vulkan) | PocketTTS-100M English q8_0 (128 MB) | ~0.5 GB |
 
-**Both models stay resident in VRAM: ~1.68 GB of 2.00 GB used, ~330 MB headroom.**
+**Both models stay resident in VRAM: ~1.68 GB of 2.00 GB used (~330-420 MB headroom).**
 
 ## Verified on 192.168.1.214 (Fedora 44, kernel 7.1.7, rootless podman)
 
-- GPU: `Oland XT` = R7 250 / HD 8670, GCN 1.0, **2 GiB VRAM**, amdgpu + host RADV (mesa 26.1.6, Vulkan 1.3, no fp16 — ggml-vulkan tolerates it).
-- Container: `localhost/wyoming-voice:latest` (1.9 GB), Ubuntu 26.04 (glibc 2.43 = host glibc, required by the baked host RADV driver).
-- Runtime mounts: only `--device /dev/dri/renderD128 --group-add 105`. The host RADV driver + its Fedora-soname deps are baked into the image at `/opt/vk/` with a container-local ICD JSON (`VK_ICD_FILENAMES=/opt/vk/radeon_icd.container.json`).
-
-### Deploy / run
-
-```bash
-podman run -d --name wyoming-voice \
-  --device /dev/dri/renderD128 --group-add 105 \
-  --security-opt seccomp:unconfined --security-opt label=disable --ipc host \
-  -p 10300:10300 -p 10301:10301 \
-  --restart unless-stopped \
-  localhost/wyoming-voice:latest
-```
-
-On this box, replace `localhost/` with `ghcr.io/...` once pushed, or `podman save`/`load` the tarball.
-
-### Home Assistant registration
-
-Add the **Wyoming Protocol** integration twice (Settings → Devices & Services → Add Integration → Wyoming Protocol):
-
-1. **STT**: host `192.168.1.214`, port **10300** → Speech-to-Text.
-2. **TTS**: host `192.168.1.214`, port **10301** → Text-to-Speech (voice `alba`).
-
-Then under Settings → Voice assistants, point the assistant at:
-- Speech-to-text: the parakeet service (English)
-- Text-to-speech: the audiocpp/PocketTTS service
-- Wake word: your satellite's own / openwakeword
-- Conversation agent: your Claude/OpenCode/OpenRouter service (not run here — 2 GB VRAM cannot do tool-calling reliably)
+- GPU: `Oland XT` = R7 250 / HD 8670, GCN 1.0, **2 GiB VRAM**, no fp16
+  (`shaderFloat16=false`) — ggml-vulkan tolerates it via fp32 emulation.
+- Driver: **Mesa RADV 26.0.3-1ubuntu1, shipped inside the image**
+  (`apt install mesa-vulkan-drivers` on ubuntu:26.04). Verified driving the
+  Oland: `deviceName = AMD Radeon R7 200 Series (RADV OLAND)`, Vulkan 1.3.335.
+  The same image provides llvmpipe (CPU) as GPU1 — a no-GPU fallback exists.
+- The original host-driver bake (copy host RADV + Fedora sonames into the
+  image) is **obsolete** — Ubuntu 26.04's own Mesa works. Simpler and portable.
+- Runtime mounts: only `--device /dev/dri/renderD128 --group-add 105`.
 
 ## Verified numbers
 
@@ -52,41 +35,66 @@ Then under Settings → Voice assistants, point the assistant at:
 | TTS warm round-trip (client+synth+stream) | ~1.6 s for a sentence |
 | TTS output | 24 kHz, 16-bit, mono PCM WAV |
 | Loopback (TTS → STT) | transcribed back **verbatim** |
-| VRAM both-resident | 1.68 GB / 2.00 GB (330 MB headroom) |
+| Concurrency | 4× STT + 4× TTS fired simultaneously → all serialized, no GPU crash |
 
-## Build (all sources in this directory + on box at /data/llamacpp-gfx803/voice/)
+## Reliability engineering (why it survives the Oland)
+
+- **GPU fault auto-restart**: an amdgpu reset kills both Vulkan contexts
+  permanently (TTS → audiocpp HTTP 500, STT → `VK_ERROR_DEVICE_LOST`). A fault
+  detector counts ≥3 consecutive GPU-signature failures and SIGTERMs PID 1; the
+  entrypoint trap exits and the orchestrator's `--restart unless-stopped`
+  brings the container back with fresh contexts.
+- **Cross-process GPU lock**: STT (parakeet.cpp, own Vulkan context) and TTS
+  (audiocpp_server, own Vulkan context) hold a shared file lock around every
+  GPU call, so only **one kernel is in flight at a time** — the 2 s amdgpu
+  scheduler timeout is never contested. 20 s bound on the lock so a stuck
+  request errors instead of hanging HA.
+- **Env-driven config**: the entrypoint renders `server.json` and every model
+  path from env vars, so bigger models are a build arg or an env var away.
+
+## Build / run
 
 ```bash
-# 1. audio.cpp builder: Ubuntu 24.04 + glslc built from shaderc source (ggml-vulkan needs glslc; Ubuntu has none)
-podman build -t audiocpp-vk-build -f Dockerfile.build-audiocpp .
-
-# 2. Final image (uses audiocpp-vk-build + prebuilt parakeet binaries + baked vk-libs + models)
-podman build -t wyoming-voice -f Dockerfile .
+# The whole build is one command now (self-contained, downloads its own models):
+./scripts/build.sh          # podman build -t wyoming-voice -f Dockerfile .
+./scripts/run.sh            # auto-detects render device + group
 ```
 
-Engine versions:
-- parakeet.cpp v0.5.0 (mudler) — prebuilt Vulkan binary + libparakeet.so C-API.
-- audio.cpp 0.6.0 (0xShug0) — custom composite build (`pocket_tts` only), Vulkan backend.
-- Models: `mudler/parakeet-cpp-gguf` `ctc-0.6b-q8_0.gguf`; `audio-cpp/audio.cpp-gguf` `PocketTTS-GGUF/english/pocket-tts-english-q8_0.gguf` + `embeddings/alba.safetensors`.
+Or with buildx/bake (what CI does): `docker buildx bake final`.
+
+## Engine versions
+
+- parakeet.cpp v0.5.0 (mudler) — prebuilt Vulkan binary + `libparakeet.so` C-API.
+- audio.cpp 0.6.0 (0xShug0) — custom composite build (`pocket_tts` only), Vulkan
+  backend; glslc (shaderc) built from source (Ubuntu ships no binary).
+- Models: `mudler/parakeet-cpp-gguf` `ctc-0.6b-q8_0.gguf`;
+  `audio-cpp/audio.cpp-gguf` `PocketTTS-GGUF/english/pocket-tts-english-q8_0.gguf`
+  + `embeddings/alba.safetensors`. All overridable at build (ARGs) or runtime (env).
 
 ## Architecture / files
 
-- `entrypoint.sh` — PID 1 supervisor; runs three children, auto-restarts each:
-  - `audiocpp_server --config /app/server.json` (TTS model resident, REST on 127.0.0.1:8100)
-  - `wyoming_stt.py` (ctypes → `libparakeet.so`, resident model, offline full-utterance transcribe)
-  - `wyoming_tts.py` (Wyoming → `POST /v1/audio/speech` on audiocpp_server, streams WAV back)
-- `wyoming_stt.py` / `wyoming_tts.py` — from-scratch Wyoming protocol handlers (official `wyoming` pip package), model loaded once, process-global.
-- `server.json` — audiocpp_server config (backend vulkan, device 0, model pocket-tts, voice preset `alba`).
-- `vk-libs/` — host RADV 26.1.6 + Fedora-soname deps (libLLVM.so.22.1, libSPIRV-Tools, libedit.so.0, libxml2.so.2, libdisplay-info.so.3) + `radeon_icd.container.json`. **Host-specific**: rebuilding on a different host requires re-copying these from that host (`/usr/lib64`).
-- `model_specs/` — audio.cpp model specs (needed by audiocpp_server for pocket_tts).
-- `models/` — staged model files, baked into the image.
+- `entrypoint.sh` — PID 1 supervisor; runs two children, auto-restarts each:
+  - `audiocpp_server` (TTS model resident, REST on 127.0.0.1:8100)
+  - `wyoming_voice.py` — the single Wyoming server (ASR + TTS on 10300)
+- `wyoming_voice.py` — from-scratch Wyoming handler (official `wyoming` pip
+  package): STT via ctypes → `libparakeet.so`, TTS via REST →
+  `POST /v1/audio/speech`; models loaded once, process-global; owns the GPU
+  fault detector + cross-process lock.
+- `model_specs/` — audio.cpp model specs (needed by audiocpp_server for
+  `pocket_tts`).
+- `docker-bake.hcl` + `.github/workflows/build.yml` — CI publish to ghcr
+  (mirrors the rocm-migraphx-ort-builder pipeline pattern).
 
 ## Gotchas learned (this hardware)
 
-- Oland (GCN 1.0) has **no fp16 ALU** (`shaderFloat16=false`) — ggml-vulkan still works, falls back to fp32 emulation.
-- Host mesa 26.1.6 needs **glibc ≥ 2.41** (`GLIBC_ABI_GNU2_TLS`) — Ubuntu 24.04 (2.39) cannot load the host RADV driver; Ubuntu 26.04 (2.43) can.
-- Fedora-built driver has Fedora sonames (`libedit.so.0`, `libxml2.so.2`, `libLLVM.so.22.1`, `libSPIRV-Tools.so`, `libdisplay-info.so.3`) that do not exist in Ubuntu — bake host copies; provide the rest from Ubuntu packages.
-- Never set `LD_LIBRARY_PATH` container-wide — it breaks bash/python (host libc/libstdc++ poisoning). The baked `/opt/vk` + `ldconfig` + custom ICD JSON avoids it entirely.
-- ICD JSON's `library_path` must point inside the container (`/opt/vk/libvulkan_radeon.so`), not the host path.
-- `pkill -f <scriptname>` kills the very ssh session running it — use the `[s]cript` bracket trick.
-- Both llama.cpp-style servers must never share this GPU at the same time (2 GB); this image owns the whole card.
+- Oland (GCN 1.0) has **no fp16 ALU** (`shaderFloat16=false`) — ggml-vulkan
+  still works, falls back to fp32 emulation.
+- Mesa needs **glibc ≥ 2.41** (`GLIBC_ABI_GNU2_TLS`) — Ubuntu 24.04 (2.39)
+  cannot run current Mesa; **Ubuntu 26.04 (2.43)** is the runtime base.
+- The original host-driver bake taught us: never `LD_LIBRARY_PATH`
+  container-wide (breaks bash/python); ICD `library_path` must point inside the
+  container; Fedora sonames don't exist in Ubuntu. All moot now that the image
+  ships its own Mesa.
+- HA's Wyoming TTS reader ends on an `audio-stop` event — the server must send
+  `AudioStop` after the chunks; `synthesize-stop` (request-side) hangs it.
+- This image owns the whole card — never share it with another GPU workload.
