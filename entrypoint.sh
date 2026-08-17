@@ -27,5 +27,7 @@ run_one "wyoming-voice" python3 /app/wyoming_voice.py \
   --stt-lib /usr/lib/libparakeet.so --stt-device "${PARAKEET_DEVICE}" \
   --audio-cpp-url http://127.0.0.1:8100 --tts-model-id pocket-tts --tts-voice alba &
 
-trap 'kill 0' INT TERM
+# On SIGTERM (incl. GPU-fault self-restart from wyoming_voice.py), stop the
+# whole container so podman's --restart unless-stopped brings it back fresh.
+trap 'kill 0 2>/dev/null; exit 0' INT TERM
 wait

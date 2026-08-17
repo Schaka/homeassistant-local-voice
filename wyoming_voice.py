@@ -22,6 +22,7 @@ import io
 import json
 import logging
 import os
+import signal
 import threading
 import urllib.request
 import wave
@@ -42,7 +43,7 @@ from wyoming.info import (
     TtsVoice,
 )
 from wyoming.server import AsyncEventHandler, AsyncServer
-from wyoming.tts import Synthesize, SynthesizeStop
+from wyoming.tts import Synthesize
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -50,6 +51,41 @@ _RATE = 16000
 _WIDTH = 2
 _CHANNELS = 1
 _CHUNK_SAMPLES = 4096
+
+# Signatures of a dead GPU (amdgpu reset / VK_ERROR_DEVICE_LOST). When these
+# pile up, neither process recovers on its own, so we trigger a container
+# restart (podman --restart unless-stopped brings it back with fresh contexts).
+_GPU_FAULT_SIGNS = ("device lost", "devicelost", "context is lost", "http error 500")
+_GPU_FAULT_THRESHOLD = 3
+
+
+class GpuFaultDetector:
+    """Counts consecutive GPU faults across connections; escalates to restart."""
+
+    def __init__(self, threshold: int = _GPU_FAULT_THRESHOLD):
+        self._threshold = threshold
+        self._count = 0
+        self._lock = threading.Lock()
+
+    def on_success(self) -> None:
+        with self._lock:
+            if self._count:
+                _LOGGER.info("GPU recovered (cleared %d faults)", self._count)
+            self._count = 0
+
+    def on_failure(self, err: Exception) -> None:
+        text = str(err).lower()
+        if not any(sign in text for sign in _GPU_FAULT_SIGNS):
+            _LOGGER.warning("non-GPU failure (not counted): %s", err)
+            return
+        with self._lock:
+            self._count += 1
+            _LOGGER.warning("GPU fault %d/%d: %s", self._count, self._threshold, err)
+            if self._count >= self._threshold:
+                _LOGGER.error(
+                    "GPU appears lost after %d faults; restarting container", self._count
+                )
+                os.kill(1, signal.SIGTERM)
 
 
 # ---------------------------------------------------------------------------
@@ -160,6 +196,7 @@ class VoiceEventHandler(AsyncEventHandler):
         self,
         stt: ParakeetSTT,
         tts: AudioCppTTS,
+        faults: GpuFaultDetector,
         info_event: Event,
         *args,
         **kwargs,
@@ -167,12 +204,15 @@ class VoiceEventHandler(AsyncEventHandler):
         super().__init__(*args, **kwargs)
         self._stt = stt
         self._tts = tts
+        self._faults = faults
         self._info_event = info_event
         self._converter = AudioChunkConverter(rate=_RATE, width=_WIDTH, channels=_CHANNELS)
         self._audio = bytearray()
         self._have_audio_start = False
+        _LOGGER.info("new wyoming connection")
 
     async def handle_event(self, event: Event) -> bool:
+        _LOGGER.debug("event: %s", event.type)
         if Describe.is_type(event.type):
             await self.write_event(self._info_event)
             return True
@@ -182,6 +222,10 @@ class VoiceEventHandler(AsyncEventHandler):
             return True  # English-only model; language selection ignored
 
         if AudioStart.is_type(event.type):
+            start = AudioStart.from_event(event)
+            _LOGGER.info(
+                "audio-start: %s Hz/%d-bit/%dch", start.rate, start.width * 8, start.channels
+            )
             self._audio = bytearray()
             self._have_audio_start = True
             return True
@@ -190,6 +234,7 @@ class VoiceEventHandler(AsyncEventHandler):
             chunk = AudioChunk.from_event(event)
             chunk = self._converter.convert(chunk)
             self._audio.extend(chunk.audio)
+            _LOGGER.debug("audio chunk: +%d bytes (total %d)", len(chunk.audio), len(self._audio))
             return True
 
         if AudioStop.is_type(event.type):
@@ -200,11 +245,17 @@ class VoiceEventHandler(AsyncEventHandler):
                         / 32768.0
                     )
                     text = await asyncio.to_thread(self._stt.transcribe, pcm)
+                    self._faults.on_success()
                     if text:
                         _LOGGER.info("STT: %s", text)
                         await self.write_event(Transcript(text=text).event())
+                    else:
+                        _LOGGER.warning("STT: empty transcript for %d bytes", len(self._audio))
+                else:
+                    _LOGGER.warning("STT: audio-stop with no audio received")
             except Exception as err:
                 _LOGGER.error("STT failed: %s", err)
+                self._faults.on_failure(err)
                 return False
             finally:
                 self._audio = bytearray()
@@ -236,9 +287,12 @@ class VoiceEventHandler(AsyncEventHandler):
                             audio=payload[i : i + chunk_bytes],
                         ).event()
                     )
-                await self.write_event(SynthesizeStop().event())
+                # HA's Wyoming TTS reads audio-chunk events and ends on audio-stop
+                await self.write_event(AudioStop().event())
+                self._faults.on_success()
             except Exception as err:
                 _LOGGER.error("TTS failed: %s", err)
+                self._faults.on_failure(err)
                 return False
             return True
 
@@ -332,10 +386,11 @@ async def main() -> None:
         raise RuntimeError("audiocpp_server never became healthy")
 
     info_event = make_info().event()
+    faults = GpuFaultDetector()
     server = AsyncServer.from_uri(args.uri)
     server_task = asyncio.create_task(
         server.run(
-            lambda *a, **kw: VoiceEventHandler(stt, tts, info_event, *a, **kw)
+            lambda *a, **kw: VoiceEventHandler(stt, tts, faults, info_event, *a, **kw)
         )
     )
     try:
