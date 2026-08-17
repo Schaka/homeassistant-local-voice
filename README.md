@@ -2,7 +2,7 @@
 
 The cheapest possible **self-hosted voice assistant for Home Assistant**: local
 **STT + TTS on one container, one port**, GPU-accelerated via Vulkan — tested
-on a 10-15 € AMD **R7 250 (2 GB, GCN 1.0)** that most people would e-waste.
+on a 5-10 € AMD **R7 250 (2 GB, GCN 1.0)** that most people would consider e-waste.
 
 - **One image, one Wyoming server, one port (10300)** advertising **both** an
   ASR and a TTS program — Home Assistant registers both services from a single
@@ -208,8 +208,7 @@ and `TTS_LANGUAGES_BCP`).
 
 ## Build & release
 
-Mirrors the [rocm-migraphx-ort-builder](https://github.com/Schaka/rocm-migraphx-ort-builder)
-pipeline: `docker-bake.hcl` is the single source of truth for tags, cache refs
+`docker-bake.hcl` is the single source of truth for tags, cache refs
 and model args; `.github/workflows/build.yml` only hands variables to bake and
 `--push`es. `docker buildx bake final` locally reproduces CI exactly.
 
