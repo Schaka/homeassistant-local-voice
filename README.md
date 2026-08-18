@@ -134,6 +134,22 @@ conversation agent for the same Voice Assistant. Note that with a 2 GB GPU you
 cannot run a tool-calling LLM locally *and* keep STT+TTS resident — this is why
 the default story offloads the agent.
 
+### Tested agent configurations
+
+Real-world experience on this stack (Home-LLM → OpenRouter, Voice Assistant
+pipeline, STT+TTS from this image):
+
+| agent / model | result |
+|---|---|
+| Home-LLM + `deepseek/deepseek-v4-flash` | ✅ **works well** |
+| Home-LLM + `gpt-5.6-luna` | ❌ unusable — rejects Home-LLM's tool-call payload (HTTP 400) |
+| Home-LLM + free-tier routes | ⚠️ usable but rate-limited (429s) for more than a few commands/day |
+
+Model choice matters more than the backend: Home-LLM sends `strict` tool
+schemas, which some models (flagship "luna"-style ones) reject outright while
+smaller/compatibility-first models handle fine. If a model 400s, swap the model
+first — the backend is just a URL + key.
+
 ## Using bigger models
 
 Everything is a build arg / env var — swap models without touching code. Two
