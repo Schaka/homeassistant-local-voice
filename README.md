@@ -37,6 +37,9 @@ on a 5-10 € AMD **R7 250 (2 GB, GCN 1.0)** that most people would consider e-w
 | Loopback (TTS → STT) | transcribed back **verbatim** |
 | VRAM both-resident | 1.68 GB / 2.00 GB |
 
+Also tested on Intel **UHD730** (iGPU) with Parakeet q8 and q4: both quants run
+pretty fast, q8 a bit slower than on the R7 250.
+
 ## Why this is the cheapest
 
 - **Parakeet CTC beats Whisper on cost per accuracy** at small sizes, and
@@ -225,41 +228,6 @@ under `PocketTTS-GGUF/english/embeddings/` (set `TTS_VOICE_ID`) and other
 languages (`german`, `italian`, `portuguese`, `spanish` — set `TTS_LANGUAGE`
 and `TTS_LANGUAGES_BCP`).
 
-## Build & release
-
-`docker-bake.hcl` is the single source of truth for tags, cache refs
-and model args; `.github/workflows/build.yml` only hands variables to bake and
-`--push`es. `docker buildx bake final` locally reproduces CI exactly.
-
-```bash
-docker buildx bake final                    # build, default models
-docker buildx bake --print final            # resolved graph, no build
-docker buildx bake final --push             # publish (logged in)
-```
-
-CI publishes to `ghcr.io/schaka/homeassistant-local-voice`:
-- push to `main` → `:latest` + `:<date>`
-- push a tag `v*` → additionally a stable `:vX.Y.Z`
-- manual dispatch → pick a release tag and/or override the model URLs
-
-The audiocpp stage compiles glslc (shaderc) + audio.cpp from source
-(~30-60 min cold); the registry cache (`mode=max`) keeps rebuilds cheap.
-
-## Repository layout
-
-```
-Dockerfile            multi-stage, self-contained (audiocpp build, parakeet
-                      release, model download, runtime with Mesa Vulkan)
-docker-bake.hcl       tags / cache / model args (single source of truth)
-.github/workflows/    build.yml: ghcr publish (main, v*, manual)
-entrypoint.sh         PID-1 supervisor; renders server.json from env
-wyoming_voice.py      Wyoming handler: STT (ctypes → libparakeet.so) + TTS
-                      (REST → audiocpp_server), GPU fault detector + lock
-model_specs/          audio.cpp model specs (pocket_tts)
-scripts/              build.sh, run.sh, download-models.sh, test clients
-docs/hardware-notes.md  everything learned the hard way (Oland/GCN1)
-```
-
 ## Test without Home Assistant
 
 ```bash
@@ -270,17 +238,6 @@ python3 scripts/test/wyoming_tts_client.py "Hello from the voice assistant." out
 ```
 
 Both talk to port 10300 — STT and TTS share the one Wyoming server.
-
-## Troubleshooting
-
-- **Container keeps restarting after a GPU fault**: that is the self-heal
-  working — an amdgpu reset kills both Vulkan contexts and the container
-  restarts with fresh ones. Check `docker logs wyoming-voice` for
-  `GPU fault N/3`.
-- **Slow but never crashes**: the cross-process GPU lock is serializing
-  everything — expected on a 2 GB GCN1 card.
-- **CPU fallback**: no `/dev/dri` present → llvmpipe (very slow). Fine for
-  smoke tests.
 
 ## Attributions
 
