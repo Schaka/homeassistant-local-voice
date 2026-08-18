@@ -134,6 +134,9 @@ conversation agent for the same Voice Assistant. Note that with a 2 GB GPU you
 cannot run a tool-calling LLM locally *and* keep STT+TTS resident — this is why
 the default story offloads the agent.
 
+A known-good system prompt (with backend setup notes and pitfalls) lives in
+[docs/home-llm-prompt.md](docs/home-llm-prompt.md).
+
 ### Tested agent configurations
 
 Real-world experience on this stack (Home-LLM → OpenRouter, Voice Assistant
