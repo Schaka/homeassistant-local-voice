@@ -21,6 +21,17 @@ export TTS_LANGUAGES_BCP="${TTS_LANGUAGES_BCP:-en}"
 export VK_DEVICE="${VK_DEVICE:-0}"
 export TTS_THREADS="${TTS_THREADS:-2}"
 
+# Reject a truncated/corrupt model before it reaches the native loader -- a
+# short download still has a syntactically valid GGUF header (metadata sits
+# at the front of the file), and parakeet.cpp/audio.cpp trust that header's
+# declared tensor sizes rather than the actual file length.
+if ! python3 /app/verify_gguf.py \
+    "/models/stt/${STT_MODEL_FILENAME}" \
+    "${TTS_DIR}/${TTS_MODEL_FILENAME}"; then
+  echo "FATAL: model file failed integrity check (see above) - refusing to start" >&2
+  exit 1
+fi
+
 # Render the audiocpp_server config from env (the runtime image ships no jq;
 # python3 is already present for wyoming).
 python3 - <<'PY'
