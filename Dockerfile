@@ -87,7 +87,7 @@ COPY --from=parakeet-stage /parakeet-v0.5.0-bin-linux-vulkan-x64/parakeet-cli /u
 COPY --from=models-stage /models /models
 
 COPY model_specs /app/model_specs
-COPY wyoming_voice.py entrypoint.sh /app/
+COPY wyoming_voice.py verify_gguf.py entrypoint.sh /app/
 RUN chmod +x /app/entrypoint.sh
 
 # Defaults, all overridable at runtime (env) -- see entrypoint.sh.
