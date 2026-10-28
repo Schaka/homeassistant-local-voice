@@ -69,6 +69,14 @@ variable "TTS_MODEL_ID" { default = "pocket-tts" }
 variable "TTS_VOICE_ID" { default = "alba" }
 variable "STT_MODEL_NAME" { default = "parakeet-ctc-0.6b" }
 
+# Optional conversation agent. llama.cpp is a pinned prebuilt Vulkan release
+# (bump on purpose, like parakeet.cpp v0.5.0). No LLM model is baked by
+# default -- mount one under /models/llm (README: "Local conversation agent").
+variable "LLAMACPP_BUILD" { default = "b11966" }
+variable "LLM_MODEL_URL" { default = "" }
+variable "LLM_MODEL_FILENAME" { default = "" }
+variable "LLM_FAMILY" { default = "minicpm5" }
+
 # ---------------------------------------------------------------------------
 # Target
 # ---------------------------------------------------------------------------
@@ -92,6 +100,10 @@ target "final" {
     TTS_MODEL_ID       = "${TTS_MODEL_ID}"
     TTS_VOICE_ID       = "${TTS_VOICE_ID}"
     STT_MODEL_NAME     = "${STT_MODEL_NAME}"
+    LLAMACPP_BUILD     = "${LLAMACPP_BUILD}"
+    LLM_MODEL_URL      = "${LLM_MODEL_URL}"
+    LLM_MODEL_FILENAME = "${LLM_MODEL_FILENAME}"
+    LLM_FAMILY         = "${LLM_FAMILY}"
   }
   cache-from = cache_from("final")
   cache-to = cache_to("final")

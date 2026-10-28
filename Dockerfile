@@ -1,7 +1,8 @@
 # syntax=docker/dockerfile:1
 #
 # Self-contained Wyoming STT + TTS for Home Assistant, GPU-accelerated via
-# Vulkan. Ships its own Mesa Vulkan drivers (radv for AMD -- including ancient
+# Vulkan, plus an optional local conversation agent (llama-server). Ships its
+# own Mesa Vulkan drivers (radv for AMD -- including ancient
 # GCN1 like the R7 250 -- plus llvmpipe for CPU-only hosts), so there is no
 # dependency on ROCm, CUDA, or a host-installed driver. Only the GPU device
 # node and render group are passed through at runtime.
@@ -45,9 +46,29 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     && rm -rf /var/lib/apt/lists/*
 
 # ============================================================================
-# Stage 3: model download. The ARGs are the "bigger models" lever -- override
+# Stage 3: llama.cpp prebuilt Vulkan release, for the optional conversation
+# agent (llama-server, OpenAI-compatible /v1). Every binary has RUNPATH
+# $ORIGIN, so the directory moves as one unit and its own libggml never
+# collides with the ggml inside libparakeet.so / audiocpp_server. Only
+# llama-server and its libraries are kept.
+# ============================================================================
+FROM ubuntu:24.04 AS llamacpp-stage
+ARG LLAMACPP_BUILD=b11966
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        curl ca-certificates \
+    && curl -sL "https://github.com/ggml-org/llama.cpp/releases/download/${LLAMACPP_BUILD}/llama-${LLAMACPP_BUILD}-bin-ubuntu-vulkan-x64.tar.gz" | tar xz \
+    && mv "/llama-${LLAMACPP_BUILD}" /llama.cpp \
+    && find /llama.cpp -maxdepth 1 -type f \
+        \( -name 'llama*' ! -name 'llama-server' -o -name 'ggml-rpc-server' \) -delete \
+    && find /llama.cpp -maxdepth 1 -name 'libllama-*-impl.so' ! -name 'libllama-server-impl.so' -delete \
+    && test -x /llama.cpp/llama-server \
+    && rm -rf /var/lib/apt/lists/*
+
+# ============================================================================
+# Stage 4: model download. The ARGs are the "bigger models" lever -- override
 # them (CLI, docker-bake.hcl, or the CI workflow) to bake any other gguf /
-# embedding from the same repos into the image. See README.
+# embedding from the same repos into the image. See README. The LLM is
+# optional: an empty LLM_MODEL_URL (default) bakes none.
 # ============================================================================
 FROM ubuntu:24.04 AS models-stage
 ARG STT_MODEL_URL=https://huggingface.co/mudler/parakeet-cpp-gguf/resolve/main/ctc-0.6b-q8_0.gguf
@@ -56,16 +77,21 @@ ARG TTS_MODEL_URL=https://huggingface.co/audio-cpp/audio.cpp-gguf/resolve/main/P
 ARG TTS_MODEL_FILENAME=pocket-tts-english-q8_0.gguf
 ARG TTS_VOICE_URL=https://huggingface.co/audio-cpp/audio.cpp-gguf/resolve/main/PocketTTS-GGUF/english/embeddings/alba.safetensors
 ARG TTS_VOICE_FILENAME=alba.safetensors
+ARG LLM_MODEL_URL=
+ARG LLM_MODEL_FILENAME=
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         curl ca-certificates \
-    && mkdir -p /models/stt /models/pocket-tts/embeddings \
+    && mkdir -p /models/stt /models/pocket-tts/embeddings /models/llm \
     && curl -sL --retry 3 -o "/models/stt/${STT_MODEL_FILENAME}" "${STT_MODEL_URL}" \
     && curl -sL --retry 3 -o "/models/pocket-tts/${TTS_MODEL_FILENAME}" "${TTS_MODEL_URL}" \
     && curl -sL --retry 3 -o "/models/pocket-tts/embeddings/${TTS_VOICE_FILENAME}" "${TTS_VOICE_URL}" \
+    && if [ -n "${LLM_MODEL_URL}" ]; then \
+        curl -sL --retry 3 -o "/models/llm/${LLM_MODEL_FILENAME}" "${LLM_MODEL_URL}"; \
+    fi \
     && rm -rf /var/lib/apt/lists/*
 
 # ============================================================================
-# Stage 4: runtime. Ubuntu 26.04 is required: current Mesa builds need
+# Stage 5: runtime. Ubuntu 26.04 is required: current Mesa builds need
 # GLIBC_ABI_GNU2_TLS (glibc >= 2.41); 24.04 cannot load them.
 # ============================================================================
 FROM ubuntu:26.04
@@ -75,6 +101,8 @@ ARG TTS_LANGUAGE=english
 ARG TTS_MODEL_ID=pocket-tts
 ARG TTS_VOICE_ID=alba
 ARG STT_MODEL_NAME=parakeet-ctc-0.6b
+ARG LLM_MODEL_FILENAME=
+ARG LLM_FAMILY=minicpm5
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         python3 python3-pip ca-certificates curl mesa-vulkan-drivers libgomp1 \
     && pip3 install --break-system-packages --no-cache-dir wyoming numpy \
@@ -84,6 +112,10 @@ COPY --from=audiocpp-builder /audio.cpp/build/linux-vulkan-release/bin/audiocpp_
 COPY --from=audiocpp-builder /audio.cpp/build/linux-vulkan-release/bin/audiocpp_server /usr/local/bin/audiocpp_server
 COPY --from=parakeet-stage /parakeet-v0.5.0-lib-linux-vulkan-x64/libparakeet.so /usr/lib/libparakeet.so
 COPY --from=parakeet-stage /parakeet-v0.5.0-bin-linux-vulkan-x64/parakeet-cli /usr/local/bin/parakeet-cli
+COPY --from=llamacpp-stage /llama.cpp /opt/llama.cpp
+# The release is built on an older Ubuntu; fail the build here, not at
+# runtime, if a shared library it needs (libvulkan, libssl, ...) is missing.
+RUN ! ldd /opt/llama.cpp/llama-server /opt/llama.cpp/*.so | grep 'not found'
 COPY --from=models-stage /models /models
 
 COPY model_specs /app/model_specs
@@ -96,7 +128,10 @@ ENV STT_MODEL_FILENAME=${STT_MODEL_FILENAME:-parakeet-ctc-0.6b-q8_0.gguf} \
     TTS_LANGUAGE=${TTS_LANGUAGE} \
     TTS_MODEL_ID=${TTS_MODEL_ID} \
     TTS_VOICE_ID=${TTS_VOICE_ID} \
-    STT_MODEL_NAME=${STT_MODEL_NAME}
+    STT_MODEL_NAME=${STT_MODEL_NAME} \
+    LLM_MODEL_FILENAME=${LLM_MODEL_FILENAME} \
+    LLM_FAMILY=${LLM_FAMILY}
 
-EXPOSE 10300
+# 10300: Wyoming (STT + TTS). 8080: llama-server, only when an LLM is set.
+EXPOSE 10300 8080
 ENTRYPOINT ["/app/entrypoint.sh"]

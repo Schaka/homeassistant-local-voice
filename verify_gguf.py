@@ -16,7 +16,9 @@ import os
 import struct
 import sys
 
-# (block_size, type_size_bytes) for the ggml types this project's models use.
+# (block_size, type_size_bytes) for the ggml types this project's models use,
+# incl. the IQ3/IQ4 / MXFP4 types of the community LLM quants (nothing below
+# Q3 is supported).
 _TYPE_SIZES = {
     0: (1, 4),      # F32
     1: (1, 2),      # F16
@@ -32,12 +34,17 @@ _TYPE_SIZES = {
     13: (256, 176), # Q5_K
     14: (256, 210), # Q6_K
     15: (256, 292), # Q8_K
+    18: (256, 98),  # IQ3_XXS
+    20: (32, 18),   # IQ4_NL
+    21: (256, 110), # IQ3_S
+    23: (256, 136), # IQ4_XS
     24: (1, 1),     # I8
     25: (1, 2),     # I16
     26: (1, 4),     # I32
     27: (1, 8),     # I64
     28: (1, 8),     # F64
     30: (1, 2),     # BF16
+    39: (32, 17),   # MXFP4
 }
 
 _GGUF_STRING = 8

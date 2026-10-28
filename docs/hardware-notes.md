@@ -67,6 +67,10 @@ Or with buildx/bake (what CI does): `docker buildx bake final`.
 - parakeet.cpp v0.5.0 (mudler) — prebuilt Vulkan binary + `libparakeet.so` C-API.
 - audio.cpp 0.6.0 (0xShug0) — custom composite build (`pocket_tts` only), Vulkan
   backend; glslc (shaderc) built from source (Ubuntu ships no binary).
+- llama.cpp b11966 (ggml-org): prebuilt `ubuntu-vulkan-x64` release, only
+  `llama-server` kept, under `/opt/llama.cpp` (RUNPATH `$ORIGIN`, so its
+  libggml does not collide with parakeet/audio.cpp). Optional conversation
+  agent. It does not fit on the R7 250 next to STT+TTS.
 - Models: `mudler/parakeet-cpp-gguf` `ctc-0.6b-q8_0.gguf`;
   `audio-cpp/audio.cpp-gguf` `PocketTTS-GGUF/english/pocket-tts-english-q8_0.gguf`
   + `embeddings/alba.safetensors`. All overridable at build (ARGs) or runtime (env).

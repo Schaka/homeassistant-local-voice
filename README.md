@@ -16,11 +16,14 @@ on a 5-10 € AMD **R7 250 (2 GB, GCN 1.0)** that most people would consider e-w
   ancient GCN1 like the R7 250 — plus llvmpipe for CPU-only hosts). **No ROCm,
   no CUDA, no host driver install, no host mounts.** You pass through one GPU
   device node and it just works.
-- **The reasoning agent does not run here** (2 GB VRAM cannot do tool-calling
+- **By default the reasoning agent does not run here** (2 GB VRAM cannot do tool-calling
   reliably). Offload it to OpenRouter's **free** models (Gemma 3 27B,
   GPT-OSS-20B, …) via the official Home Assistant OpenRouter integration — free
   tiers cover a few voice commands per day easily. Or use the Local LLM
   (HomeLLM) add-on. Details below.
+- **Optional local agent**: on a bigger GPU or an iGPU, the same image can
+  also run the agent with llama.cpp (MiniCPM5 or Ling-3.0-tiny). See
+  [Local conversation agent](#local-conversation-agent-optional).
 
 ## Verified on hardware
 
@@ -60,7 +63,9 @@ Home Assistant
  │         ├─ STT: ctypes → libparakeet.so (Parakeet CTC 0.6B)   [Vulkan ctx 1]
  │         └─ TTS: REST → audiocpp_server (127.0.0.1:8100)       [Vulkan ctx 2]
  └─ Conversation agent → official OpenRouter integration (free models)
-      └─ or Local LLM (HomeLLM) add-on
+      ├─ or Local LLM (HomeLLM) add-on
+      └─ or llama.cpp integration → tcp://<host>:8080/v1  (optional, this container)
+           └─ llama-server (MiniCPM5 / Ling-3.0-tiny)         [Vulkan ctx 3]
 ```
 
 `wyoming_voice.py` serializes all GPU work with a cross-process file lock — the
@@ -155,6 +160,152 @@ Model choice matters more than the backend: Home-LLM sends `strict` tool
 schemas, which some models (flagship "luna"-style ones) reject outright while
 smaller/compatibility-first models handle fine. If a model 400s, swap the model
 first — the backend is just a URL + key.
+
+## Local conversation agent (optional)
+
+The image also contains llama-server from [llama.cpp](https://github.com/ggml-org/llama.cpp)
+(prebuilt Vulkan release, pinned build). If you give it a model, it runs the
+conversation agent in the same container. It serves an OpenAI-compatible API
+on port 8080 (`/v1`). If you give it no model, it does not start.
+
+The 2 GB R7 250 cannot hold an LLM next to STT and TTS. Use a GPU with 4 GB or
+more, or an iGPU (it uses system RAM).
+
+### 1. Choose a model
+
+You have two ways to choose a model. Set only one of them.
+
+| variable | example | what it does |
+|---|---|---|
+| `LLM_HF_REPO` | `openbmb/MiniCPM5-1B-GGUF:Q4_K_M` | llama-server downloads the model from Hugging Face on the first start. It keeps the download in `/models/llm/hf`. |
+| `LLM_MODEL_FILENAME` | `MiniCPM5-1B-Q4_K_M.gguf` | Uses a file that is already in `/models/llm` (mounted or baked). |
+
+Mount a host directory on `/models/llm`. The models then stay on the host
+drive. If you do not mount it, the model is inside the container. If you
+remove the container, the model is lost.
+
+The image never deletes a model. When `LLM_HF_REPO` is already in the cache,
+llama-server starts with `--offline` and does not contact Hugging Face. This
+prevents an automatic re-download. If the upstream file changes and
+llama-server is online, it deletes the cached copy and downloads the new file.
+The cache uses the Hugging Face layout under
+`/models/llm/hf`. To get a newer upstream version, delete that model folder
+yourself. Several quants can stay in the cache, and `LLM_HF_REPO` selects one.
+
+```bash
+docker run -d --name wyoming-voice \
+  -v /srv/voice-models/llm:/models/llm \
+  -e LLM_HF_REPO=openbmb/MiniCPM5-1B-GGUF:Q4_K_M \
+  -e LLM_FAMILY=minicpm5 \
+  --device /dev/dri/renderD128 --group-add "$(stat -c %g /dev/dri/renderD128)" \
+  -p 10300:10300 -p 8080:8080 --restart unless-stopped \
+  ghcr.io/schaka/homeassistant-local-voice:latest
+```
+
+### 2. Connect Home Assistant
+
+1. Go to Settings > Devices & services > Add Integration > llama.cpp (Home Assistant 2026.8 or later).
+2. Set the URL to `http://<host>:8080/v1`. Leave the API key empty.
+3. Select the model.
+4. In Settings > Voice assistants, set the conversation agent to the new llama.cpp agent.
+
+Other OpenAI-compatible clients use the same URL. They can send any API key,
+or no key. If you set `LLM_API_KEY`, the server accepts only that key. The
+Home-LLM add-on also works with its "llama.cpp server" backend.
+
+### Supported models
+
+Two model families are supported. `LLM_FAMILY` selects the sampling settings
+that the model card recommends.
+
+| `LLM_FAMILY` | model | architecture |
+|---|---|---|
+| `minicpm5` | MiniCPM5-1B, MiniCPM5-2B (dense) | `llama` |
+| `ling3` | Ling-3.0-tiny (7.9B MoE, 1.3B parameters run per token) | `bailingmoe3` |
+
+Both families are hybrid reasoning models. Thinking is on by default. The
+thinking text goes to `reasoning_content`, so TTS does not speak it. Thinking
+adds time before the spoken reply. To turn it off, set `LLM_REASONING=off`.
+
+The smallest supported quant is Q3. Lower quants (Q2, IQ2, Q1) are not supported.
+
+| `LLM_HF_REPO` | file | LLM memory at 64k context |
+|---|---|---|
+| `openbmb/MiniCPM5-1B-GGUF:Q4_K_M` | 0.69 GB | about 2.5 GB |
+| `openbmb/MiniCPM5-1B-GGUF:Q8_0` | 1.15 GB | about 3.0 GB |
+| `bartowski/MiniCPM5-2B-GGUF:Q3_K_M` | 1.24 GB | about 4.3 GB |
+| `openbmb/MiniCPM5-2B-GGUF:Q4_K_M` | 1.56 GB | about 4.7 GB |
+| `openbmb/MiniCPM5-2B-GGUF:Q8_0` | 2.68 GB | about 5.8 GB |
+| `bartowski/Ling-3.0-tiny-GGUF:Q3_K_M` | 3.79 GB | about 4.4 GB |
+| `bartowski/Ling-3.0-tiny-GGUF:IQ4_XS` | 4.39 GB | about 5.0 GB |
+| `inclusionAI/Ling-3.0-tiny-GGUF:Q4_K_M` | 4.82 GB | 5.1 GiB (measured) |
+| `inclusionAI/Ling-3.0-tiny-GGUF:Q6_K` | 6.50 GB | about 7.2 GB |
+| `inclusionAI/Ling-3.0-tiny-GGUF:Q8_0` | 8.41 GB | about 9.1 GB |
+
+Add about 1.7 GB for STT and TTS. The KV cache (the memory that holds the
+context) differs a lot between the families. At 64k it is 1.5 GiB for
+MiniCPM5-1B and 2.6 GiB for MiniCPM5-2B. Ling-3.0-tiny keeps a KV cache in
+only 6 of its 24 layers, so it needs 0.4 GiB. If MiniCPM5 does not fit, set
+`LLM_CTX=32k` to halve the KV cache.
+
+No unsloth quants exist for these models. The bartowski repos give the
+smaller quants. `./scripts/download-models.sh <file>.gguf` stages the official
+files with a size test, for use with `LLM_MODEL_FILENAME`.
+
+### Configuration
+
+| variable | default | purpose |
+|---|---|---|
+| `LLM_FAMILY` | `minicpm5` | `minicpm5` or `ling3` |
+| `LLM_MODEL_NAME` | from the file or repo | model name that Home Assistant shows |
+| `LLM_DEVICE` | `Vulkan0` | `none` runs the LLM on the CPU |
+| `LLM_GPU_LAYERS` | `auto` | layers on the GPU. `auto` fits the model to free VRAM |
+| `LLM_CTX` | `64k` | context size: `32k`, `64k`, `128k` or `256k` (`256k` only for `ling3`, with YaRN rope scaling) |
+| `LLM_REASONING` | `on` | thinking mode: `on` or `off` |
+| `LLM_REASONING_BUDGET` | `512` | maximum thinking tokens per reply. `-1` removes the limit |
+| `LLM_API_KEY` | empty | empty accepts any key |
+| `LLM_EXTRA_ARGS` | empty | more llama-server arguments, for example `--n-cpu-moe 8` |
+| `HF_TOKEN` | empty | token for gated Hugging Face repos |
+
+### Tested
+
+Intel Arrow Lake-S iGPU (4 Xe cores, Mesa ANV) and its 24-core CPU, Q4_K_M,
+64k context, thinking on. The test prompt has 4.5k tokens, about the size of an
+Assist prompt with 100 exposed entities. Run it with
+`python3 scripts/test/llm_client.py "Turn on the kitchen light." --devices 100`.
+
+| model | device | first request | prompt | generation |
+|---|---|---|---|---|
+| MiniCPM5-1B | iGPU | 16.6 s | 422 tok/s | 17 tok/s |
+| MiniCPM5-1B | CPU (`LLM_DEVICE=none`) | 75 s (1568 thinking tokens) | 164 tok/s | 33 tok/s |
+| Ling-3.0-tiny | iGPU | more than 120 s | 38 tok/s | 11 tok/s |
+| Ling-3.0-tiny | CPU (`LLM_DEVICE=none`) | 49 s | 101 tok/s | 31 tok/s |
+
+After the first request, llama-server reuses the cached prompt prefix. Home
+Assistant puts the instructions and the entity list before the current time,
+so this prefix stays the same. Later requests to Ling-3.0-tiny on the CPU took
+0.6 to 1.4 s.
+
+Results:
+
+- Both families give correct tool calls through llama.cpp's own parsers.
+- MiniCPM5-1B called `HassTurnOn` for the question "Is the bedroom light on?".
+  Ling-3.0-tiny answered it correctly.
+- On this iGPU, Ling-3.0-tiny runs fully on Vulkan (no CPU fallback), but
+  slower than on the CPU. On an Intel iGPU, use `LLM_DEVICE=none` for Ling.
+
+### Limits
+
+- The GPU lock of `wyoming_voice.py` does not cover llama-server. In one voice
+  pipeline, STT, the agent and TTS run one after the other. Two satellites at
+  the same time can overlap on the GPU.
+- Without `LLM_API_KEY`, any client on your network can use the server, and
+  CORS allows all origins. If port 8080 is reachable from outside your LAN,
+  set `LLM_API_KEY`.
+- With thinking on, a small model can think for a long time. MiniCPM5-1B once
+  used 1568 tokens. `LLM_REASONING_BUDGET` limits this to 512 tokens by default.
+- MTP speculative decoding stays off. For Ling-3.0-tiny it hangs on RADV
+  (llama.cpp PR #26608).
 
 ## Using bigger models
 
