@@ -115,7 +115,13 @@ The first request after a restart then takes about 0.5 s instead of more than 60
 
 If a backup tool stops the container every night, the cache survives, but voice control is off during the backup. Exclude the container from such a backup. You can download the models again.
 
+## Patched chat template for Ling
+
+After a tool result, the original Ling template starts the answer with an open `<think>`. Ling then often writes its answer at once and never closes the block, so llama-server returns the answer as thinking (`reasoning_content`), and the reply text is empty. In a replay of recorded Home Assistant requests, this happened in 3 of 3 tries for one request. With the patched template `templates/ling3.jinja`, the turn after a tool result starts with a closed `<think></think>`, and the problem did not occur. Ling still thinks after a user message, where it decides which tool to call.
+
 ## Thinking guard
+
+The guard is the fallback for other models and rare cases.
 
 With thinking on, a small model now and then writes its whole answer into the thinking block and does not close it. Then the reply has no text. Home Assistant does not show thinking, so it sees an empty reply, asks again, and stops after 10 rounds with "Unable to get response".
 

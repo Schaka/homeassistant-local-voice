@@ -105,7 +105,13 @@ case "${LLM_FAMILY}" in
       llm_preset=(--temp 0.7 --top-p 0.95 --min-p 0)
     fi
     ;;
-  ling3) llm_preset=(--temp 1.0 --top-p 0.95 --top-k 20) ;;
+  ling3) llm_preset=(--temp 1.0 --top-p 0.95 --top-k 20)
+         # Patched chat template (templates/ling3.jinja): after a tool result the
+         # turn starts with a closed <think></think>, so the answer is never filed
+         # as reasoning. LLM_TEMPLATE_FIX=off uses the template from the GGUF.
+         if [ "${LLM_TEMPLATE_FIX:-on}" = on ]; then
+           llm_preset+=(--chat-template-file /app/templates/ling3.jinja)
+         fi ;;
   *)
     echo "FATAL: unknown LLM_FAMILY=${LLM_FAMILY} (expected minicpm5 or ling3)" >&2
     exit 1
