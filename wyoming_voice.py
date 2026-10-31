@@ -24,6 +24,7 @@ import io
 import json
 import logging
 import os
+import re
 import signal
 import threading
 import time
@@ -226,6 +227,34 @@ class AudioCppTTS:
                 return resp.read()
 
 
+_MD_LINK = re.compile(r"\[([^\]]+)\]\([^)]*\)")
+_MD_EMPHASIS = re.compile(r"(\*\*|__|\*|`)(.+?)\1")
+_MD_LINE_PREFIX = re.compile(r"^\s*(#{1,6}\s+|[-*+•]\s+|\d+[.)]\s+|>\s*)")
+
+
+def _speakable(text: str) -> str:
+    """Turn markdown from the conversation agent into plain spoken sentences.
+
+    Small local models ignore "no markdown" in the prompt now and then. The TTS
+    model reads "**" and "-" aloud or stumbles on them, so this removes the
+    markup and joins list items and lines into sentences.
+    """
+    text = re.sub(r"```.*?```", " ", text, flags=re.S)
+    text = _MD_LINK.sub(r"\1", text)
+    text = _MD_EMPHASIS.sub(r"\2", text)
+    sentences = []
+    for line in text.splitlines():
+        line = _MD_LINE_PREFIX.sub("", line).strip(" *_`#|")
+        if not line:
+            continue
+        if line[-1] not in ".!?:;,":
+            line += "."
+        sentences.append(line)
+    text = " ".join(sentences)
+    text = text.replace("°C", " degrees").replace("°", " degrees")
+    return re.sub(r"\s+", " ", text).strip()
+
+
 def _parse_wav(data: bytes) -> tuple[int, int, int, bytes]:
     if data[:4] != b"RIFF":
         raise ValueError("TTS response is not a RIFF/WAV file")
@@ -310,7 +339,7 @@ class VoiceEventHandler(AsyncEventHandler):
         # --- TTS path ---
         if Synthesize.is_type(event.type):
             synth = Synthesize.from_event(event)
-            text = (synth.text or "").strip()
+            text = _speakable(synth.text or "")
             if not text:
                 _LOGGER.warning("empty synthesis text")
                 return True
