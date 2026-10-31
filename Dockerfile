@@ -126,7 +126,7 @@ ARG TTS_MODEL_ID=pocket-tts
 ARG TTS_VOICE_ID=alba
 ARG STT_MODEL_NAME=parakeet-ctc-0.6b
 ARG LLM_MODEL_FILENAME=
-ARG LLM_FAMILY=minicpm5
+ARG LLM_FAMILY=
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         python3 python3-pip ca-certificates curl mesa-vulkan-drivers libgomp1 \
     && pip3 install --break-system-packages --no-cache-dir wyoming numpy \

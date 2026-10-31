@@ -31,16 +31,15 @@ Set one of these two variables, not both:
 
 | Variable | Example | Effect |
 |---|---|---|
-| `LLM_HF_REPO` | `openbmb/MiniCPM5-1B-GGUF:Q4_K_M` | llama-server downloads the model from Hugging Face at the first start, into `/models/llm/hf` |
-| `LLM_MODEL_FILENAME` | `MiniCPM5-1B-Q4_K_M.gguf` | Uses a file that is already in `/models/llm` |
+| `LLM_HF_REPO` | `inclusionAI/Ling-3.0-tiny-GGUF:Q4_K_M` | llama-server downloads the model from Hugging Face at the first start, into `/models/llm/hf` |
+| `LLM_MODEL_FILENAME` | `Ling-3.0-tiny-Q4_K_M.gguf` | Uses a file that is already in `/models/llm` |
 
 Mount a host folder on `/models/llm`. Then the model, the download cache and the saved prompt cache stay on the host.
 
 ```bash
 docker run -d --name wyoming-voice \
   -v /srv/voice-models/llm:/models/llm \
-  -e LLM_HF_REPO=openbmb/MiniCPM5-1B-GGUF:Q4_K_M \
-  -e LLM_FAMILY=minicpm5 \
+  -e LLM_HF_REPO=inclusionAI/Ling-3.0-tiny-GGUF:Q4_K_M \
   --device /dev/dri/renderD128 --group-add "$(stat -c %g /dev/dri/renderD128)" \
   -p 10300:10300 -p 8080:8080 --restart unless-stopped \
   ghcr.io/schaka/homeassistant-local-voice:latest
@@ -59,25 +58,19 @@ Other OpenAI-compatible clients use the same URL, for example the "llama.cpp ser
 
 ## Supported models
 
-`LLM_FAMILY` selects the sampling values that the model card recommends.
+`LLM_FAMILY` selects the sampling values that the model card recommends and, for Ling, the patched chat template. If it is empty, the image detects the family from the model name. For any other model, set it.
 
 | `LLM_FAMILY` | Model | Architecture |
 |---|---|---|
-| `minicpm5` | MiniCPM5-1B, MiniCPM5-2B (dense) | `llama` |
 | `ling3` | Ling-3.0-tiny (7.9B MoE, 1.3B parameters active per token) | `bailingmoe3` |
-| `granite4` | IBM Granite 4.0 H Micro (3B) and H Tiny (7B MoE, about 1B parameters active per token) | `granitehybrid` (Mamba-2 and attention layers) |
+| `granite4` | IBM Granite 4.0 H Tiny (7B MoE, about 1B parameters active per token). H Micro (3B) uses the same family, but was not tested. | `granitehybrid` (Mamba-2 and attention layers) |
 
-MiniCPM5 and Ling 3.0 are hybrid reasoning models, and thinking is on by default. The thinking text goes to `reasoning_content`, so TTS does not speak it. Thinking adds time before the reply. `LLM_REASONING=off` turns it off, and `LLM_REASONING_BUDGET` (default 512 tokens) limits it.
+Ling 3.0 is a hybrid reasoning model, and thinking is on by default. The thinking text goes to `reasoning_content`, so TTS does not speak it. Thinking adds time before the reply. `LLM_REASONING=off` turns it off, and `LLM_REASONING_BUDGET` (default 512 tokens) limits it.
 
 The smallest supported quant is Q3. Q2, IQ2 and Q1 are not supported.
 
 | `LLM_HF_REPO` | File | LLM memory at 64k context |
 |---|---|---|
-| `openbmb/MiniCPM5-1B-GGUF:Q4_K_M` | 0.69 GB | About 2.5 GB |
-| `openbmb/MiniCPM5-1B-GGUF:Q8_0` | 1.15 GB | About 3.0 GB |
-| `bartowski/MiniCPM5-2B-GGUF:Q3_K_M` | 1.24 GB | About 4.3 GB |
-| `openbmb/MiniCPM5-2B-GGUF:Q4_K_M` | 1.56 GB | About 4.7 GB |
-| `openbmb/MiniCPM5-2B-GGUF:Q8_0` | 2.68 GB | About 5.8 GB |
 | `bartowski/Ling-3.0-tiny-GGUF:Q3_K_M` | 3.79 GB | About 4.4 GB |
 | `bartowski/Ling-3.0-tiny-GGUF:IQ4_XS` | 4.39 GB | About 5.0 GB |
 | `inclusionAI/Ling-3.0-tiny-GGUF:Q4_K_M` | 4.82 GB | 5.1 GiB (measured) |
@@ -92,37 +85,24 @@ Granite 4.0 has no thinking mode, so `LLM_REASONING` has no effect for `granite4
 | `ibm-granite/granite-4.0-h-tiny-GGUF:Q4_K_M` | 4.23 GB |
 | `ibm-granite/granite-4.0-h-tiny-GGUF:Q8_0` | 7.39 GB |
 
-Add about 1.7 GB for STT and TTS. The KV cache (the memory that holds the context) is very different for the two families. At 64k context, it is 1.5 GiB for MiniCPM5-1B, 2.6 GiB for MiniCPM5-2B and 0.4 GiB for Ling-3.0-tiny. Ling keeps a KV cache in only 6 of its 24 layers. If MiniCPM5 does not fit, `LLM_CTX=32k` halves its KV cache.
+Add about 1.7 GB for STT and TTS (about 2.4 GB with the STT model `tdt-1.1b-q8_0`). Both families need little memory for the context. Ling keeps a KV cache (the memory that holds the context) in only 6 of its 24 layers: 0.4 GiB at 64k context.
 
-The bartowski repos give the smaller quants. No unsloth quants exist for these models. `./scripts/download-models.sh <file>.gguf` downloads the official files with a size test, for use with `LLM_MODEL_FILENAME`.
+The bartowski repo gives the smaller Ling quants. `./scripts/download-models.sh <file>.gguf` downloads the official files with a size test, for use with `LLM_MODEL_FILENAME`.
 
-## Models compared with Home Assistant
+## Which model to use
 
-The test sent 13 voice questions through the Home Assistant conversation API, plus 5 questions in one conversation. All models had the same prompt and tools: weather, bins, lights, shopping list, meal plan, recipes, web search, media and one action. All models ran on the CPU of an i5-12400T (6 threads), Q4 quants, temperature 0.7 from Home Assistant. Measured on 2026-10-31.
+Ling-3.0-tiny on the CPU is the default and the most reliable choice that we measured. [model-comparison.md](model-comparison.md) has the test of eight models and quants through Home Assistant: correct answers, time per answer, and why the others were not chosen.
 
-| Model | Correct | Median time | Slowest | Notes |
-|---|---|---|---|---|
-| Granite 4.0 H Tiny Q4_K_M | 13 of 13 | 2.8 s | 44 s (empty cache) | Short answers. Says "already paused" instead of inventing an action. |
-| Ling-3.0-tiny Q4_K_M (patched template) | 13 of 13 | 5.1 s | 55 s (empty cache) | Sometimes calls a wrong media action (unmute for pause). |
-| Qwen3.5-4B Q4_K_M | 13 of 13 | 20.5 s | 114 s | Correct, but 4 to 7 times slower |
-| Gemma 4 E4B q4_0 (QAT) | 13 of 13 | 26.5 s | 109 s | Correct, but the slowest |
-| LFM2.5-8B-A1B Q4_K_M | 11 of 13 | 14.2 s | 169 s | Markdown and lists in the answers, one tool loop |
+## Vulkan or CPU
 
-"Slowest" is the first request, which prefills the full prompt (about 6,000 tokens). Later requests use the prompt cache.
+Both families run on the CPU by default (`LLM_DEVICE=none`). On an Intel UHD 730 iGPU, Ling-3.0-tiny runs fully on Vulkan, but it is slower there than on the CPU:
 
-A second round with 12 other questions compared only Ling and Granite. Ling answered all correctly with a median of about 6 s. Granite answered 9 of 12 correctly with a median of about 3 s. It called a wrong tool for the date and then gave a wrong date. It also misread the rain forecast. For a light that it did not switch off, it said "already off". Granite 4.0 H Tiny at Q8_0 (7.39 GB) did not fix this. It also gave a wrong date, did not find an exposed light, and reported a light as on that was off. So the errors come from the model, not from the quant. Granite 4.2 3B Q4_K_M (dense, with thinking) answered mostly correctly. But it needed 50 to 265 s per answer, so the test stopped after the first round. So Ling stays the default. Granite is the faster choice for setups where speed matters more than reliability.
-
-## MiniCPM5 or Ling-3.0-tiny, Vulkan or CPU
-
-| | MiniCPM5-1B | Ling-3.0-tiny |
+| Ling-3.0-tiny Q4_K_M | Prefill | Generation |
 |---|---|---|
-| Best device | iGPU or GPU (`LLM_DEVICE=Vulkan0`) | CPU (`LLM_DEVICE=none`) |
-| Memory | Small model, large KV cache | Large model, small KV cache |
-| Tool calls | Correct, but it called `HassTurnOn` for the question "Is the bedroom light on?" | Correct, also for questions about states |
-| Speed on an Intel iGPU | 422 tokens/s prefill, 17 tokens/s generation | 38 tokens/s prefill, 11 tokens/s generation |
-| Speed on a desktop CPU | 164 tokens/s prefill, 33 tokens/s generation | 101 to 140 tokens/s prefill, 31 to 35 tokens/s generation |
+| Intel iGPU (Vulkan) | 38 tokens/s | 11 tokens/s |
+| Desktop CPU | 101 to 140 tokens/s | 31 to 35 tokens/s |
 
-Ling-3.0-tiny gives the better answers. On an Intel iGPU, Ling runs fully on Vulkan, but it is slower there than on the CPU, so run Ling on the CPU. Run MiniCPM5 on the GPU.
+On a dedicated GPU with enough memory, `LLM_DEVICE=Vulkan0` can be faster.
 
 An Assist prompt with all tools has about 4,500 to 7,000 tokens. The first request prefills all of it, which takes 30 to 70 s on a CPU. `python3 scripts/test/llm_client.py "Turn on the kitchen light." --devices 100` sends such a prompt for a test.
 
@@ -142,7 +122,7 @@ If a backup tool stops the container every night, the cache survives, but voice 
 
 ## Patched chat template for Ling
 
-After a tool result, the original Ling template starts the answer with an open `<think>`. Ling then often writes its answer at once and never closes the block. llama-server then returns the answer as thinking (`reasoning_content`), and the reply text is empty. In a replay of recorded Home Assistant requests, this happened in 3 of 3 tries for one request. With the patched template `templates/ling3.jinja`, the turn after a tool result starts with a closed `<think></think>`, and the problem did not occur. Ling still thinks after a user message, where it decides which tool to call.
+After a tool result, the original Ling template starts the answer with an open `<think>`. Ling then often writes its answer at once and never closes the block. llama-server then returns the answer as thinking (`reasoning_content`), and the reply text is empty. With the patched template `templates/ling3.jinja`, the turn after a tool result starts with a closed `<think></think>`, and the problem did not occur. Ling still thinks after a user message, where it decides which tool to call.
 
 Upstream status: llama.cpp b11057 added a Ling 3.0 parser for a tool call inside an unclosed thinking block (issue #27462). It does not cover a plain answer without `</think>`, which is the case that the patched template fixes. The case can be reported in that issue with a recorded request, and the template patch can go to the model's Hugging Face repository.
 
@@ -157,7 +137,7 @@ With `LLM_THINKING_GUARD=on` (off by default), `llm_guard.py` takes port 8080, a
 ## Limits
 
 1. Without `LLM_API_KEY`, every client on your network can use the server, and CORS allows all origins. If port 8080 is reachable from outside your LAN, set `LLM_API_KEY`.
-2. With thinking on, a small model can think for a long time. MiniCPM5-1B once used 1,568 tokens. `LLM_REASONING_BUDGET` limits it to 512 tokens by default.
+2. With thinking on, a small model can think for a long time. `LLM_REASONING_BUDGET` limits it to 512 tokens by default.
 3. MTP speculative decoding is off. For Ling-3.0-tiny, it hangs on RADV (llama.cpp PR #26608).
 4. If the container has a memory limit, do not start a second llama-server in it. Two Ling instances need about 10 GB.
 

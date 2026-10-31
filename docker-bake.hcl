@@ -75,7 +75,7 @@ variable "STT_MODEL_NAME" { default = "parakeet-ctc-0.6b" }
 variable "LLAMACPP_BUILD" { default = "b11966" }
 variable "LLM_MODEL_URL" { default = "" }
 variable "LLM_MODEL_FILENAME" { default = "" }
-variable "LLM_FAMILY" { default = "minicpm5" }
+variable "LLM_FAMILY" { default = "" }
 
 # ---------------------------------------------------------------------------
 # Target

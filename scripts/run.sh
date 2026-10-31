@@ -13,7 +13,7 @@ if [ -z "$RENDER_DEV" ]; then
 fi
 RENDER_GROUP="$(stat -c %g "$RENDER_DEV")"
 
-# Optional conversation agent (LLM_FAMILY: minicpm5|ling3), either
+# Optional conversation agent (LLM_FAMILY: ling3|granite4, empty = detect), either
 #   LLM_MODEL_FILENAME  a gguf staged by ./scripts/download-models.sh, or
 #   LLM_HF_REPO         e.g. inclusionAI/Ling-3.0-tiny-GGUF:Q4_K_M, downloaded
 #                       on first start.
@@ -25,7 +25,7 @@ if [ -n "${LLM_MODEL_FILENAME:-}${LLM_HF_REPO:-}" ]; then
         -v "$PWD/models/llm:/models/llm"
         -e LLM_MODEL_FILENAME="${LLM_MODEL_FILENAME:-}"
         -e LLM_HF_REPO="${LLM_HF_REPO:-}"
-        -e LLM_FAMILY="${LLM_FAMILY:-minicpm5}"
+        -e LLM_FAMILY="${LLM_FAMILY:-}"
     )
 fi
 

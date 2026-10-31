@@ -47,8 +47,23 @@ if [ -n "${LLM_HF_REPO}" ]; then
   fi
 fi
 export LLM_MODEL_NAME="${LLM_MODEL_NAME:-${llm_default_name}}"
-export LLM_FAMILY="${LLM_FAMILY:-minicpm5}"
-export LLM_DEVICE="${LLM_DEVICE:-Vulkan0}"      # "none" = CPU only
+# LLM_FAMILY: ling3 or granite4. Empty = detect from the model name; any
+# other model must name its family, because the family selects the chat
+# template (ling3 gets a patched one) and the sampling values.
+export LLM_FAMILY="${LLM_FAMILY:-}"
+if [ -z "${LLM_FAMILY}" ] && [ -n "${LLM_MODEL_FILENAME}${LLM_HF_REPO}" ]; then
+  case "${LLM_MODEL_FILENAME,,}${LLM_HF_REPO,,}" in
+    *ling-3*)    LLM_FAMILY=ling3 ;;
+    *granite-4*) LLM_FAMILY=granite4 ;;
+    *)
+      echo "FATAL: set LLM_FAMILY (ling3 or granite4) for ${LLM_MODEL_FILENAME}${LLM_HF_REPO}" >&2
+      exit 1
+      ;;
+  esac
+fi
+# Both supported families run faster on the CPU than on an iGPU (measured on
+# an Intel UHD 730). Vulkan0 uses the first GPU.
+export LLM_DEVICE="${LLM_DEVICE:-none}"         # "none" = CPU only
 export LLM_GPU_LAYERS="${LLM_GPU_LAYERS:-auto}" # auto = fit to free VRAM
 export LLM_CTX="${LLM_CTX:-64k}"                # 32k | 64k | 128k | 256k
 export LLM_REASONING="${LLM_REASONING:-on}"     # on | off (thinking mode)
@@ -79,17 +94,15 @@ if ! python3 /app/verify_gguf.py "${models[@]}"; then
   exit 1
 fi
 
-# Per-family llama-server defaults. MiniCPM5 and Ling 3.0 are hybrid reasoning
-# models; Granite 4.0 has no thinking mode.
-# Thinking stays on by default (the models' own default); LLM_REASONING=off
-# trades answer quality for a faster spoken reply. llama-server returns the
-# thinking in reasoning_content, so it never reaches TTS. Sampling follows
-# each model card (MiniCPM5 has one set per mode, and warns that llama.cpp's
-# default min-p 0.05 causes repetition). MTP speculative decoding
-# (--spec-type) stays off: it hangs on RADV for Ling 3.0 (llama.cpp PR
-# #26608). LLM_EXTRA_ARGS comes last, so it overrides any of these.
-# A small model can think for 1500+ tokens on one command (MiniCPM5-1B did,
-# 75 s on CPU), so thinking is capped; llama-server then forces the answer.
+# Per-family llama-server defaults. Ling 3.0 is a hybrid reasoning model;
+# Granite 4.0 has no thinking mode. Ling's thinking stays on by default (the
+# model's own default); LLM_REASONING=off trades answer quality for a faster
+# spoken reply. llama-server returns the thinking in reasoning_content, so it
+# never reaches TTS. Sampling follows each model card. MTP speculative
+# decoding (--spec-type) stays off: it hangs on RADV for Ling 3.0 (llama.cpp
+# PR #26608). LLM_EXTRA_ARGS comes last, so it overrides any of these.
+# A small model can think for 1500+ tokens on one command, so thinking is
+# capped; llama-server then forces the answer.
 case "${LLM_REASONING}" in
   on)  llm_reasoning=(--reasoning on --reasoning-budget "${LLM_REASONING_BUDGET}") ;;
   off) llm_reasoning=(--reasoning off) ;;
@@ -99,13 +112,7 @@ case "${LLM_REASONING}" in
     ;;
 esac
 case "${LLM_FAMILY}" in
-  minicpm5)
-    if [ "${LLM_REASONING}" = on ]; then
-      llm_preset=(--temp 0.9 --top-p 0.95 --min-p 0)
-    else
-      llm_preset=(--temp 0.7 --top-p 0.95 --min-p 0)
-    fi
-    ;;
+  "") llm_preset=() ;;  # no LLM configured
   ling3) llm_preset=(--temp 1.0 --top-p 0.95 --top-k 20)
          # Patched chat template (templates/ling3.jinja): after a tool result the
          # turn starts with a closed <think></think>, so the answer is never filed
@@ -121,12 +128,12 @@ case "${LLM_FAMILY}" in
     llm_preset=(--temp 0.0)
     ;;
   *)
-    echo "FATAL: unknown LLM_FAMILY=${LLM_FAMILY} (expected minicpm5, ling3 or granite4)" >&2
+    echo "FATAL: unknown LLM_FAMILY=${LLM_FAMILY} (expected ling3 or granite4)" >&2
     exit 1
     ;;
 esac
 
-# Context size. All three families are trained to 128k. 256k needs YaRN rope
+# Context size. Both families are trained to 128k. 256k needs YaRN rope
 # scaling, which only Ling 3.0 documents (factor 2 over the 128k base).
 case "${LLM_CTX}" in
   32k)  llm_ctx=(-c 32768) ;;

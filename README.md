@@ -8,7 +8,7 @@ A self-hosted voice assistant backend for Home Assistant in one container. It ru
 |---|---|---|
 | Speech to text (STT) | [parakeet.cpp](https://github.com/mudler/parakeet.cpp) with NVIDIA Parakeet CTC 0.6B | On |
 | Text to speech (TTS) | [audio.cpp](https://github.com/0xShug0/audio.cpp) with PocketTTS-100M | On |
-| Conversation agent (LLM) | [llama.cpp](https://github.com/ggml-org/llama.cpp) llama-server with MiniCPM5, Ling-3.0-tiny or Granite 4.0 | Off. A model setting starts it. |
+| Conversation agent (LLM) | [llama.cpp](https://github.com/ggml-org/llama.cpp) llama-server with Ling-3.0-tiny or Granite 4.0 | Off. A model setting starts it. |
 | Web search tool for the agent | [SearXNG](https://github.com/searxng/searxng) and a small MCP server | Off |
 
 The image contains its own Mesa Vulkan drivers (RADV for AMD, ANV for Intel, llvmpipe for the CPU). You do not install drivers, ROCm or CUDA on the host.
@@ -41,11 +41,11 @@ If the host has no GPU, the container uses the CPU. Speech is then slower but wo
 
 ## Memory targets
 
-| What runs | GPU memory (or RAM on an iGPU) |
+| What runs | Memory |
 |---|---|
-| STT and TTS with the default models | About 1.7 GB, so a 2 GB GPU is enough |
-| Plus MiniCPM5-1B Q4_K_M at 64k context | About 4.2 GB |
-| Plus Ling-3.0-tiny Q4_K_M at 64k context | About 6.8 GB, or run Ling on the CPU with about 5 GB of RAM |
+| STT and TTS with the default models | About 1.7 GB of GPU memory (or RAM on an iGPU), so a 2 GB GPU is enough |
+| Plus Ling-3.0-tiny Q4_K_M at 64k context, on the CPU | About 5 GB of RAM |
+| Plus Granite 4.0 H Tiny Q4_K_M at 64k context, on the CPU | About 4.5 GB of RAM (estimate: the file is 4.23 GB) |
 
 [docs/llm.md](docs/llm.md) has the full table for each model and quant.
 

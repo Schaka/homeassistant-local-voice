@@ -9,7 +9,7 @@
 #
 # Optional conversation agent: pass the LLM gguf filename (the same value as
 # LLM_MODEL_FILENAME at runtime) to also stage it under models/llm/, e.g.
-#   ./scripts/download-models.sh MiniCPM5-1B-Q4_K_M.gguf
+#   ./scripts/download-models.sh Ling-3.0-tiny-Q4_K_M.gguf
 set -eu
 cd "$(dirname "$0")/.."
 
@@ -23,10 +23,8 @@ HF="https://huggingface.co"
 # malformed in llama.cpp PR #26608).
 case "$LLM_FILE" in
     "") ;;
-    MiniCPM5-1B-Q4_K_M.gguf)   LLM_REPO=openbmb/MiniCPM5-1B-GGUF;       LLM_SIZE=688065920 ;;
-    MiniCPM5-1B-Q8_0.gguf)     LLM_REPO=openbmb/MiniCPM5-1B-GGUF;       LLM_SIZE=1153529216 ;;
-    MiniCPM5-2B-Q4_K_M.gguf)   LLM_REPO=openbmb/MiniCPM5-2B-GGUF;       LLM_SIZE=1561318368 ;;
-    MiniCPM5-2B-Q8_0.gguf)     LLM_REPO=openbmb/MiniCPM5-2B-GGUF;       LLM_SIZE=2679710688 ;;
+    granite-4.0-h-tiny-Q4_K_M.gguf) LLM_REPO=ibm-granite/granite-4.0-h-tiny-GGUF; LLM_SIZE=4230976352 ;;
+    granite-4.0-h-tiny-Q8_0.gguf)   LLM_REPO=ibm-granite/granite-4.0-h-tiny-GGUF; LLM_SIZE=7390331744 ;;
     Ling-3.0-tiny-Q4_K_M.gguf) LLM_REPO=inclusionAI/Ling-3.0-tiny-GGUF; LLM_SIZE=4823894944 ;;
     Ling-3.0-tiny-Q5_K_M.gguf) LLM_REPO=inclusionAI/Ling-3.0-tiny-GGUF; LLM_SIZE=5635443616 ;;
     Ling-3.0-tiny-Q6_K.gguf)   LLM_REPO=inclusionAI/Ling-3.0-tiny-GGUF; LLM_SIZE=6499262368 ;;
