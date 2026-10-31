@@ -265,6 +265,39 @@ def _parse_wav(data: bytes) -> tuple[int, int, int, bytes]:
 # ---------------------------------------------------------------------------
 # Wyoming handler
 # ---------------------------------------------------------------------------
+_STT_DEBUG_KEEP = 200  # newest recordings to keep in STT_DEBUG_DIR
+
+
+def _save_stt_debug(audio: bytes, text: str) -> None:
+    """Save one STT request as a 16 kHz mono WAV plus its transcript.
+
+    Only active when the variable STT_DEBUG_DIR names a folder. The recordings let
+    you compare STT models on real requests (your voice, your microphones). They
+    contain everything that was said after the wake word, so the option is off by
+    default. Only the newest _STT_DEBUG_KEEP recordings stay.
+    """
+    folder = os.environ.get("STT_DEBUG_DIR", "").strip()
+    if not folder or not audio:
+        return
+    try:
+        path = Path(folder)
+        path.mkdir(parents=True, exist_ok=True)
+        stem = time.strftime("%Y%m%d-%H%M%S") + f"-{int(time.time() * 1000) % 1000:03d}"
+        with wave.open(str(path / f"{stem}.wav"), "wb") as wav:
+            wav.setnchannels(_CHANNELS)
+            wav.setsampwidth(_WIDTH)
+            wav.setframerate(_RATE)
+            wav.writeframes(audio)
+        (path / f"{stem}.txt").write_text(text + "\n", encoding="utf-8")
+        # Remove the oldest pairs above the limit.
+        old = sorted(path.glob("*.wav"))[:-_STT_DEBUG_KEEP]
+        for wav_file in old:
+            wav_file.unlink(missing_ok=True)
+            wav_file.with_suffix(".txt").unlink(missing_ok=True)
+    except OSError as err:  # a full or read-only disk must never break STT
+        _LOGGER.warning("STT debug recording failed: %s", err)
+
+
 class VoiceEventHandler(AsyncEventHandler):
     def __init__(
         self,
@@ -324,6 +357,8 @@ class VoiceEventHandler(AsyncEventHandler):
                         _LOGGER.info("STT: %s", text)
                     else:
                         _LOGGER.warning("STT: empty transcript for %d bytes", len(self._audio))
+                    # Optional: keep the request for model comparisons (STT_DEBUG_DIR).
+                    await asyncio.to_thread(_save_stt_debug, bytes(self._audio), text)
                 else:
                     text = ""
                     _LOGGER.warning("STT: audio-stop with no audio received")

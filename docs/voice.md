@@ -27,6 +27,21 @@ With more GPU memory, you can use larger models. The memory need is about the si
 | 4 GB | `ctc-1.1b-q8_0` (1.53 GB) or `tdt-0.6b-v3-q8_0` (941 MB, streaming) | `pocket-tts-english-bf16` (219 MB) |
 | 6 GB or more | `tdt-1.1b-q8_0` (1.55 GB, streaming) or `ctc-0.6b-f16` (1.37 GB) | `bf16`, any language |
 
+### Measured STT accuracy
+
+Word error rate on 10 voice commands (music names, lights, weather, shopping list), spoken by PocketTTS. "Noisy" adds a narrow microphone band and noise at 12 dB, like a small speaker in a room:
+
+| Model | Clean | Noisy | File |
+|---|---|---|---|
+| `ctc-0.6b-q4_k` | 10 % | 19 % | 610 MB |
+| `ctc-0.6b-q8_0` | 11 % | 21 % | 875 MB |
+| `ctc-1.1b-q8_0` | 11 % | 21 % | 1.53 GB |
+| `tdt-0.6b-v2-q8_0` | 13 % | 11 % | 904 MB |
+| `tdt-0.6b-v3-q8_0` | 11 % | 10 % | 941 MB |
+| `tdt-1.1b-q8_0` | 7 % | 8 % | 1.55 GB |
+
+The CTC models often lose the first word in noise ("lay" for "play"). For satellites with small microphones, use a TDT model. `tdt-1.1b-q8_0` was the only model that wrote "Linkin Park" correctly. To test on your own voice, set `STT_DEBUG_DIR`, speak some commands, and run the recordings through the models.
+
 STT models come from [mudler/parakeet-cpp-gguf](https://huggingface.co/mudler/parakeet-cpp-gguf):
 
 | Family | Type | q8_0 size |

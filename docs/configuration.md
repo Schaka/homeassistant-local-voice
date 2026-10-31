@@ -27,6 +27,7 @@ The image contains the default STT and TTS models. Mount a folder only to use ot
 | `STT_MODEL_FILENAME` | `parakeet-ctc-0.6b-q8_0.gguf` | Model file in `/models/stt` |
 | `STT_MODEL_NAME` | `parakeet-ctc-0.6b` | Model name that Home Assistant shows |
 | `PARAKEET_DEVICE` | `Vulkan0` | Vulkan device for STT |
+| `STT_DEBUG_DIR` | empty | Folder for recordings of every STT request (WAV and transcript, newest 200). Use it to compare models on real requests, then turn it off. |
 
 ## Text to speech (TTS)
 
