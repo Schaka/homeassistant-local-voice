@@ -18,6 +18,7 @@ import argparse
 import datetime
 import json
 import logging
+import re
 import urllib.parse
 import urllib.request
 import uuid
@@ -49,6 +50,27 @@ TOOL = {
         "required": ["query"],
     },
 }
+
+
+# Words that ask for the most recent state of something. Small models rarely put
+# the year into such a query themselves, and without it the search engines rank
+# general pages first. Example: "who won the last football world cup" found only
+# overview pages and Ling answered "Argentina 2022"; with "2026" appended, all top
+# results named the 2026 winner.
+_RECENCY = re.compile(
+    r"\b(last|latest|newest|recent|recently|current|currently|now|today|tonight|"
+    r"yesterday|this (year|week|month|season)|who (is|are) the|still)\b",
+    re.IGNORECASE,
+)
+_YEAR = re.compile(r"\b(19|20)\d{2}\b")
+
+
+def with_year(query, today=None):
+    """Append the current year to a query about recent events that names no year."""
+    if _YEAR.search(query) or not _RECENCY.search(query):
+        return query
+    year = (today or datetime.date.today()).year
+    return f"{query} {year}"
 
 
 def _trim(text, limit=SNIPPET_CHARS):
@@ -180,6 +202,8 @@ class Handler(BaseHTTPRequestHandler):
                 count = min(max(int(args.get("max_results") or 3), 1), 5)
             except (TypeError, ValueError):
                 count = 3
+            # Add the year for recency questions. The log below shows the query as sent.
+            query = with_year(query)
             try:
                 text = self.searcher.search(query, count)
             except Exception as err:  # noqa: BLE001 - report every failure to the model

@@ -30,6 +30,8 @@ The MCP server offers one tool, `web_search`, with the inputs `query` and `max_r
 
 A result has about 150 to 300 tokens. Generic search MCP servers offer several tools with long descriptions and can return whole web pages. On a CPU, that costs a small model many seconds of prefill per question.
 
+If a query asks for something recent ("last", "latest", "current", "this year" and similar words) and names no year, the server adds the current year to it. Small models rarely do that themselves, and without the year the search engines put general pages first.
+
 The date line is there because small models trust their training data. In a test, Ling-3.0-tiny found "Spain 2026" in the results and still answered "Argentina 2022" until the tool result had that line.
 
 ## Variables
