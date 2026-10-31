@@ -15,6 +15,7 @@ Protocol" integration supports. It uses only the Python standard library.
   web_search_mcp.py --searxng http://127.0.0.1:8888 --port 8090
 """
 import argparse
+import datetime
 import json
 import logging
 import urllib.parse
@@ -29,9 +30,10 @@ SNIPPET_CHARS = 300
 TOOL = {
     "name": "web_search",
     "description": (
-        "Searches the internet. Use it for news, current events, facts that "
-        "can change, and general knowledge you are not sure about. Returns a "
-        "few short results with their source."
+        "Searches the internet. Use it for news, current events, sports "
+        "results and facts that can change. Your own knowledge is older than "
+        "these results. For recent events, put the current year in the query. "
+        "Returns a few short results with their source and date."
     ),
     "inputSchema": {
         "type": "object",
@@ -81,7 +83,14 @@ class Searcher:
             date = (res.get("publishedDate") or "")[:10]
             meta = ", ".join(x for x in (host, date) if x)
             lines.append(f"{i}. {_trim(res.get('title'), 120)} ({meta}): {_trim(res.get('content'))}")
-        return "\n".join(lines) or "No results."
+        if not lines:
+            return "No results."
+        # Small models trust their training data over search results. The
+        # date line makes it clear that the results are the newer source.
+        today = datetime.date.today().isoformat()
+        head = (f"Search results from today, {today}. They are newer than your own "
+                "knowledge. If they disagree with it, answer from the results.")
+        return "\n".join([head, *lines])
 
 
 class Handler(BaseHTTPRequestHandler):
