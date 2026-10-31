@@ -79,7 +79,8 @@ if ! python3 /app/verify_gguf.py "${models[@]}"; then
   exit 1
 fi
 
-# Per-family llama-server defaults. Both families are hybrid reasoning models.
+# Per-family llama-server defaults. MiniCPM5 and Ling 3.0 are hybrid reasoning
+# models; Granite 4.0 has no thinking mode.
 # Thinking stays on by default (the models' own default); LLM_REASONING=off
 # trades answer quality for a faster spoken reply. llama-server returns the
 # thinking in reasoning_content, so it never reaches TTS. Sampling follows
@@ -112,13 +113,20 @@ case "${LLM_FAMILY}" in
          if [ "${LLM_TEMPLATE_FIX:-on}" = on ]; then
            llm_preset+=(--chat-template-file /app/templates/ling3.jinja)
          fi ;;
+  granite4)
+    # IBM Granite 4.0 H (Micro, Tiny): hybrid Mamba-2/transformer, built for
+    # tool calling, no thinking mode. IBM's examples decode greedily; clients
+    # such as Home Assistant send their own temperature anyway.
+    llm_reasoning=(--reasoning off); LLM_REASONING=off
+    llm_preset=(--temp 0.0)
+    ;;
   *)
-    echo "FATAL: unknown LLM_FAMILY=${LLM_FAMILY} (expected minicpm5 or ling3)" >&2
+    echo "FATAL: unknown LLM_FAMILY=${LLM_FAMILY} (expected minicpm5, ling3 or granite4)" >&2
     exit 1
     ;;
 esac
 
-# Context size. Both families are trained to 128k. 256k needs YaRN rope
+# Context size. All three families are trained to 128k. 256k needs YaRN rope
 # scaling, which only Ling 3.0 documents (factor 2 over the 128k base).
 case "${LLM_CTX}" in
   32k)  llm_ctx=(-c 32768) ;;

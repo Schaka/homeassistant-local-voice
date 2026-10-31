@@ -8,7 +8,7 @@ A self-hosted voice assistant backend for Home Assistant in one container. It ru
 |---|---|---|
 | Speech to text (STT) | [parakeet.cpp](https://github.com/mudler/parakeet.cpp) with NVIDIA Parakeet CTC 0.6B | On |
 | Text to speech (TTS) | [audio.cpp](https://github.com/0xShug0/audio.cpp) with PocketTTS-100M | On |
-| Conversation agent (LLM) | [llama.cpp](https://github.com/ggml-org/llama.cpp) llama-server with MiniCPM5 or Ling-3.0-tiny | Off. A model setting starts it. |
+| Conversation agent (LLM) | [llama.cpp](https://github.com/ggml-org/llama.cpp) llama-server with MiniCPM5, Ling-3.0-tiny or Granite 4.0 | Off. A model setting starts it. |
 | Web search tool for the agent | [SearXNG](https://github.com/searxng/searxng) and a small MCP server | Off |
 
 The image contains its own Mesa Vulkan drivers (RADV for AMD, ANV for Intel, llvmpipe for the CPU). You do not install drivers, ROCm or CUDA on the host.

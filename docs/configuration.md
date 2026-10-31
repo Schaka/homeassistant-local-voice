@@ -50,7 +50,7 @@ Set `LLM_HF_REPO` or `LLM_MODEL_FILENAME`, not both. With neither, llama-server 
 |---|---|---|
 | `LLM_HF_REPO` | empty | `<user>/<repo>[:QUANT]`. llama-server downloads the model into `/models/llm/hf` at the first start. |
 | `LLM_MODEL_FILENAME` | empty | Model file that is already in `/models/llm` |
-| `LLM_FAMILY` | `minicpm5` | `minicpm5` or `ling3`. Selects the sampling values. |
+| `LLM_FAMILY` | `minicpm5` | `minicpm5`, `ling3` or `granite4`. Selects the sampling values and, for `ling3`, the patched chat template. |
 | `LLM_MODEL_NAME` | From the file or repo | Model name that Home Assistant shows |
 | `LLM_DEVICE` | `Vulkan0` | Vulkan device. `none` runs the LLM on the CPU. |
 | `LLM_GPU_LAYERS` | `auto` | Layers on the GPU. `auto` fits the model to the free memory. |
