@@ -23,7 +23,8 @@ import time
 import urllib.error
 import urllib.request
 
-BASE = "http://127.0.0.1:8080"
+# llama-server itself, not the guard proxy (entrypoint.sh sets LLM_INTERNAL_URL).
+BASE = os.environ.get("LLM_INTERNAL_URL", "http://127.0.0.1:8080")
 POLL_S = 5            # health check interval
 SAVE_EVERY_S = 300    # how often the daemon looks for a changed slot
 MIN_TOKENS = 1024     # smaller slots are side requests (titles), not Assist

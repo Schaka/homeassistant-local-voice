@@ -115,6 +115,12 @@ The first request after a restart then takes about 0.5 s instead of more than 60
 
 If a backup tool stops the container every night, the cache survives, but voice control is off during the backup. Exclude the container from such a backup. You can download the models again.
 
+## Thinking guard
+
+With thinking on, a small model now and then writes its whole answer into the thinking block and does not close it. Then the reply has no text. Home Assistant does not show thinking, so it sees an empty reply, asks again, and stops after 10 rounds with "Unable to get response".
+
+With `LLM_THINKING_GUARD=on` (the default), `llm_guard.py` takes port 8080, and llama-server moves to the internal port 8081. The guard reads each chat reply completely. If the reply has no text and no tool call, it sends the request once more with thinking off. The model still thinks for all other replies. Because the guard reads the complete reply first, the client gets it at once at the end, not word by word.
+
 ## Limits
 
 1. Without `LLM_API_KEY`, every client on your network can use the server, and CORS allows all origins. If port 8080 is reachable from outside your LAN, set `LLM_API_KEY`.

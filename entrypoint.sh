@@ -56,6 +56,7 @@ export LLM_REASONING_BUDGET="${LLM_REASONING_BUDGET:-512}" # max thinking tokens
 export LLM_API_KEY="${LLM_API_KEY:-}"           # empty = accept any/no key
 export LLM_EXTRA_ARGS="${LLM_EXTRA_ARGS:-}"
 export LLM_SLOT_CACHE="${LLM_SLOT_CACHE:-on}"     # on | off (keep the prompt cache across restarts)
+export LLM_THINKING_GUARD="${LLM_THINKING_GUARD:-on}" # on | off (retry an empty reply once without thinking)
 
 # Web search (optional): SearXNG on 127.0.0.1 plus a one-tool MCP server
 # (web_search_mcp.py) for the Home Assistant "Model Context Protocol"
@@ -228,9 +229,19 @@ if [ -n "${LLM_MODEL_FILENAME}" ] || [ -n "${LLM_HF_REPO}" ]; then
     fi
   fi
   read -ra llm_extra <<< "${LLM_EXTRA_ARGS}"
+  # Thinking guard: with thinking on, a model now and then puts its whole answer
+  # into the thinking block, and Home Assistant gets an empty reply. llm_guard.py
+  # then takes port 8080 and retries such a reply once without thinking.
+  # llama-server moves to an internal port.
+  llm_host=0.0.0.0; llm_port=8080
+  if [ "${LLM_REASONING}" = on ] && [ "${LLM_THINKING_GUARD}" = on ]; then
+    llm_host=127.0.0.1; llm_port=8081
+    run_one "llm-guard" python3 /app/llm_guard.py --listen 0.0.0.0:8080 --backend 127.0.0.1:8081 &
+  fi
+  export LLM_INTERNAL_URL="http://127.0.0.1:${llm_port}"
   run_one "llama-server" /opt/llama.cpp/llama-server \
     "${llm_model[@]}" --alias "${LLM_MODEL_NAME}" \
-    --host 0.0.0.0 --port 8080 --no-ui \
+    --host "${llm_host}" --port "${llm_port}" --no-ui \
     --device "${LLM_DEVICE}" -ngl "${LLM_GPU_LAYERS}" "${llm_ctx[@]}" \
     --jinja "${llm_reasoning[@]}" "${llm_slot_args[@]}" \
     "${llm_preset[@]}" "${llm_extra[@]}" &

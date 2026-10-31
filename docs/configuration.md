@@ -60,6 +60,7 @@ Set `LLM_HF_REPO` or `LLM_MODEL_FILENAME`, not both. With neither, llama-server 
 | `LLM_API_KEY` | empty | Empty accepts any key. With a value, the server accepts only that key. |
 | `LLM_EXTRA_ARGS` | empty | More llama-server arguments, for example `--n-cpu-moe 8`. They come last and override the defaults. |
 | `LLM_SLOT_CACHE` | `on` | Keeps the prompt cache across restarts in `/models/llm/slots`. `off` disables it. |
+| `LLM_THINKING_GUARD` | `on` | With thinking on: if a reply has no text and no tool call (the answer is stuck in the thinking block), `llm_guard.py` asks once more without thinking. `off` disables it. |
 | `HF_TOKEN` | empty | Token for gated Hugging Face repos |
 
 ## Web search

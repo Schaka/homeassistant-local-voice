@@ -144,7 +144,7 @@ COPY --from=models-stage /models /models
 COPY --from=searxng-stage /opt/searxng /opt/searxng
 
 COPY model_specs /app/model_specs
-COPY wyoming_voice.py verify_gguf.py llm_slot_cache.py web_search_mcp.py entrypoint.sh /app/
+COPY wyoming_voice.py verify_gguf.py llm_slot_cache.py llm_guard.py web_search_mcp.py entrypoint.sh /app/
 RUN chmod +x /app/entrypoint.sh
 
 # Defaults, all overridable at runtime (env) -- see entrypoint.sh.

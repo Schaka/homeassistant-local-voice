@@ -66,11 +66,21 @@ _YEAR = re.compile(r"\b(19|20)\d{2}\b")
 
 
 def with_year(query, today=None):
-    """Append the current year to a query about recent events that names no year."""
-    if _YEAR.search(query) or not _RECENCY.search(query):
+    """Make a query about recent events name the current year.
+
+    No year: append the current year. An older year: replace it. Small models
+    put the year of their own training data into such a query ("who won the last
+    football world cup 2022"), and the search then finds the old event.
+    """
+    if not _RECENCY.search(query):
         return query
     year = (today or datetime.date.today()).year
-    return f"{query} {year}"
+    years = [int(m.group(0)) for m in _YEAR.finditer(query)]
+    if not years:
+        return f"{query} {year}"
+    if max(years) < year:
+        return _YEAR.sub(str(year), query)
+    return query
 
 
 def _trim(text, limit=SNIPPET_CHARS):
