@@ -265,6 +265,7 @@ files with a size test, for use with `LLM_MODEL_FILENAME`.
 | `LLM_REASONING_BUDGET` | `512` | maximum thinking tokens per reply. `-1` removes the limit |
 | `LLM_API_KEY` | empty | empty accepts any key |
 | `LLM_EXTRA_ARGS` | empty | more llama-server arguments, for example `--n-cpu-moe 8` |
+| `LLM_SLOT_CACHE` | `on` | keeps the prompt cache across restarts in `/models/llm/slots`. `off` disables it |
 | `HF_TOKEN` | empty | token for gated Hugging Face repos |
 
 ### Tested
@@ -285,6 +286,19 @@ After the first request, llama-server reuses the cached prompt prefix. Home
 Assistant puts the instructions and the entity list before the current time,
 so this prefix stays the same. Later requests to Ling-3.0-tiny on the CPU took
 0.6 to 1.4 s.
+
+A restart empties this cache, so the first request after a start prefills the
+full prompt again. With `LLM_SLOT_CACHE=on`, the container saves the KV cache
+(the memory that holds the processed prompt) of the last Assist conversation
+to `/models/llm/slots`. It saves every 5 minutes when the cache changed, and
+when the container stops. When llama-server starts, it reads the file back.
+For 6.2k tokens of Ling-3.0-tiny, the file is 124 MB, a save takes 0.3 s, and
+a restore takes 0.3 s. The first request after a restart then took 0.5 s
+instead of 65 s. Mount `/models/llm` writable to use it.
+
+If a backup tool stops the container every night, the cache still survives,
+but voice control is down during the backup. On Unraid, set the container to
+"skip" in the Appdata Backup plugin. The models can be downloaded again.
 
 Results:
 

@@ -55,6 +55,7 @@ export LLM_REASONING="${LLM_REASONING:-on}"     # on | off (thinking mode)
 export LLM_REASONING_BUDGET="${LLM_REASONING_BUDGET:-512}" # max thinking tokens, -1 = no cap
 export LLM_API_KEY="${LLM_API_KEY:-}"           # empty = accept any/no key
 export LLM_EXTRA_ARGS="${LLM_EXTRA_ARGS:-}"
+export LLM_SLOT_CACHE="${LLM_SLOT_CACHE:-on}"     # on | off (keep the prompt cache across restarts)
 
 # Reject a truncated/corrupt model before it reaches the native loader -- a
 # short download still has a syntactically valid GGUF header (metadata sits
@@ -200,16 +201,48 @@ if [ -n "${LLM_MODEL_FILENAME}" ] || [ -n "${LLM_HF_REPO}" ]; then
   else
     llm_model=(-m "/models/llm/${LLM_MODEL_FILENAME}")
   fi
+  # Prompt cache across restarts: the first Assist request after a start
+  # prefills the full system prompt (about 35 s for 4.8k tokens on a CPU).
+  # llm_slot_cache.py saves the KV cache of the last Assist conversation to
+  # /models/llm/slots and restores it when llama-server comes up (0.3 s).
+  # The file name holds the model and context size, because a cache from
+  # another model or context size cannot be restored.
+  llm_slot_args=()
+  llm_slot_dir=/models/llm/slots
+  llm_slot_file="${LLM_MODEL_NAME}-${LLM_CTX}.slot"
+  llm_slot_file="${llm_slot_file//[^A-Za-z0-9._-]/_}"
+  if [ "${LLM_SLOT_CACHE}" = on ]; then
+    if mkdir -p "${llm_slot_dir}" 2>/dev/null && [ -w "${llm_slot_dir}" ]; then
+      llm_slot_args=(--slot-save-path "${llm_slot_dir}")
+    else
+      echo "[llama-server] ${llm_slot_dir} is not writable, prompt cache is not kept across restarts" >&2
+      LLM_SLOT_CACHE=off
+    fi
+  fi
   read -ra llm_extra <<< "${LLM_EXTRA_ARGS}"
   run_one "llama-server" /opt/llama.cpp/llama-server \
     "${llm_model[@]}" --alias "${LLM_MODEL_NAME}" \
     --host 0.0.0.0 --port 8080 --no-ui \
     --device "${LLM_DEVICE}" -ngl "${LLM_GPU_LAYERS}" "${llm_ctx[@]}" \
-    --jinja "${llm_reasoning[@]}" \
+    --jinja "${llm_reasoning[@]}" "${llm_slot_args[@]}" \
     "${llm_preset[@]}" "${llm_extra[@]}" &
+  if [ "${LLM_SLOT_CACHE}" = on ]; then
+    python3 /app/llm_slot_cache.py daemon "${llm_slot_dir}" "${llm_slot_file}" &
+  fi
+else
+  LLM_SLOT_CACHE=off
 fi
 
 # On SIGTERM (incl. GPU-fault self-restart from wyoming_voice.py), stop the
 # whole container so the orchestrator's restart policy brings it back fresh.
-trap 'kill 0 2>/dev/null; exit 0' INT TERM
+# Save the prompt cache first: it takes about 0.3 s, well inside docker's
+# 10 s stop timeout.
+on_stop() {
+  if [ "${LLM_SLOT_CACHE}" = on ]; then
+    timeout 8 python3 /app/llm_slot_cache.py save "${llm_slot_dir}" "${llm_slot_file}"
+  fi
+  kill 0 2>/dev/null
+  exit 0
+}
+trap on_stop INT TERM
 wait

@@ -119,7 +119,7 @@ RUN ! ldd /opt/llama.cpp/llama-server /opt/llama.cpp/*.so | grep 'not found'
 COPY --from=models-stage /models /models
 
 COPY model_specs /app/model_specs
-COPY wyoming_voice.py verify_gguf.py entrypoint.sh /app/
+COPY wyoming_voice.py verify_gguf.py llm_slot_cache.py entrypoint.sh /app/
 RUN chmod +x /app/entrypoint.sh
 
 # Defaults, all overridable at runtime (env) -- see entrypoint.sh.
