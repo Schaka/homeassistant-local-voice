@@ -110,6 +110,8 @@ The test sent 13 voice questions through the Home Assistant conversation API, pl
 
 "Slowest" is the first request, which prefills the full prompt (about 6,000 tokens). Later requests use the prompt cache.
 
+A second round with 12 other questions compared only Ling and Granite. Ling answered all correctly with a median of about 6 s. Granite answered 9 of 12 correctly with a median of about 3 s. It called a wrong tool for the date and then gave a wrong date, misread the rain forecast, and said "already off" for a light that it did not switch off. So Ling stays the default. Granite is the faster choice when speed matters more than reliability.
+
 ## MiniCPM5 or Ling-3.0-tiny, Vulkan or CPU
 
 | | MiniCPM5-1B | Ling-3.0-tiny |
