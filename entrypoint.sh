@@ -56,7 +56,7 @@ export LLM_REASONING_BUDGET="${LLM_REASONING_BUDGET:-512}" # max thinking tokens
 export LLM_API_KEY="${LLM_API_KEY:-}"           # empty = accept any/no key
 export LLM_EXTRA_ARGS="${LLM_EXTRA_ARGS:-}"
 export LLM_SLOT_CACHE="${LLM_SLOT_CACHE:-on}"     # on | off (keep the prompt cache across restarts)
-export LLM_THINKING_GUARD="${LLM_THINKING_GUARD:-on}" # on | off (retry an empty reply once without thinking)
+export LLM_THINKING_GUARD="${LLM_THINKING_GUARD:-off}" # on | off (retry an empty reply once without thinking; for models without a fixed template)
 
 # Web search (optional): SearXNG on 127.0.0.1 plus a one-tool MCP server
 # (web_search_mcp.py) for the Home Assistant "Model Context Protocol"

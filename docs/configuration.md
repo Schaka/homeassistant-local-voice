@@ -61,7 +61,7 @@ Set `LLM_HF_REPO` or `LLM_MODEL_FILENAME`, not both. With neither, llama-server 
 | `LLM_EXTRA_ARGS` | empty | More llama-server arguments, for example `--n-cpu-moe 8`. They come last and override the defaults. |
 | `LLM_SLOT_CACHE` | `on` | Keeps the prompt cache across restarts in `/models/llm/slots`. `off` disables it. |
 | `LLM_TEMPLATE_FIX` | `on` | For `ling3`: use the patched chat template `templates/ling3.jinja`. After a tool result, the turn starts with a closed thinking block, so the answer never ends up as thinking. `off` uses the template from the GGUF. |
-| `LLM_THINKING_GUARD` | `on` | With thinking on: if a reply has no text and no tool call (the answer is stuck in the thinking block), `llm_guard.py` asks once more without thinking. `off` disables it. |
+| `LLM_THINKING_GUARD` | `off` | Only for models without a fixed template. With thinking on: if a reply has no text and no tool call (the answer is stuck in the thinking block), `llm_guard.py` asks once more without thinking. `off` disables it. |
 | `HF_TOKEN` | empty | Token for gated Hugging Face repos |
 
 ## Web search

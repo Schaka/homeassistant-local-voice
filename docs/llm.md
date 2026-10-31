@@ -117,15 +117,15 @@ If a backup tool stops the container every night, the cache survives, but voice 
 
 ## Patched chat template for Ling
 
-After a tool result, the original Ling template starts the answer with an open `<think>`. Ling then often writes its answer at once and never closes the block, so llama-server returns the answer as thinking (`reasoning_content`), and the reply text is empty. In a replay of recorded Home Assistant requests, this happened in 3 of 3 tries for one request. With the patched template `templates/ling3.jinja`, the turn after a tool result starts with a closed `<think></think>`, and the problem did not occur. Ling still thinks after a user message, where it decides which tool to call.
+After a tool result, the original Ling template starts the answer with an open `<think>`. Ling then often writes its answer at once and never closes the block. llama-server then returns the answer as thinking (`reasoning_content`), and the reply text is empty. In a replay of recorded Home Assistant requests, this happened in 3 of 3 tries for one request. With the patched template `templates/ling3.jinja`, the turn after a tool result starts with a closed `<think></think>`, and the problem did not occur. Ling still thinks after a user message, where it decides which tool to call.
 
 ## Thinking guard
 
-The guard is the fallback for other models and rare cases.
+Ling does not need the guard with the patched template. The guard is an option for other models that show the same problem.
 
 With thinking on, a small model now and then writes its whole answer into the thinking block and does not close it. Then the reply has no text. Home Assistant does not show thinking, so it sees an empty reply, asks again, and stops after 10 rounds with "Unable to get response".
 
-With `LLM_THINKING_GUARD=on` (the default), `llm_guard.py` takes port 8080, and llama-server moves to the internal port 8081. The guard reads each chat reply completely. If the reply has no text and no tool call, it sends the request once more with thinking off. The model still thinks for all other replies. Because the guard reads the complete reply first, the client gets it at once at the end, not word by word.
+With `LLM_THINKING_GUARD=on` (off by default), `llm_guard.py` takes port 8080, and llama-server moves to the internal port 8081. The guard reads each chat reply completely. If the reply has no text and no tool call, it sends the request once more with thinking off. The model still thinks for all other replies. Because the guard reads the complete reply first, the client gets it at once at the end, not word by word.
 
 ## Limits
 
