@@ -91,6 +91,25 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     && rm -rf /var/lib/apt/lists/*
 
 # ============================================================================
+# Stage 4b: SearXNG (optional web search, SEARCH_ENABLED=on). Built on the
+# runtime base so the venv's Python matches. Pinned commit, git metadata and
+# caches removed. About 100 MB; it only runs when enabled.
+# ============================================================================
+FROM ubuntu:26.04 AS searxng-stage
+ARG SEARXNG_COMMIT=ff8f5ddcc9f2c58d8b0276ec030f6a3adfa17525
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        python3 python3-venv git ca-certificates \
+    && git clone --filter=blob:none https://github.com/searxng/searxng.git /opt/searxng/src \
+    && git -C /opt/searxng/src checkout "${SEARXNG_COMMIT}" \
+    && python3 -m venv /opt/searxng/venv \
+    && /opt/searxng/venv/bin/pip install --no-cache-dir -r /opt/searxng/src/requirements.txt \
+    && cd /opt/searxng/src && /opt/searxng/venv/bin/python -m searx.version freeze \
+    && rm -rf /opt/searxng/src/.git \
+    && SEARXNG_SECRET=build-check /opt/searxng/venv/bin/python -c "import searx.webapp" \
+    && find /opt/searxng -name __pycache__ -prune -exec rm -rf {} + \
+    && rm -rf /var/lib/apt/lists/*
+
+# ============================================================================
 # Stage 5: runtime. Ubuntu 26.04 is required: current Mesa builds need
 # GLIBC_ABI_GNU2_TLS (glibc >= 2.41); 24.04 cannot load them.
 # ============================================================================
@@ -117,9 +136,10 @@ COPY --from=llamacpp-stage /llama.cpp /opt/llama.cpp
 # runtime, if a shared library it needs (libvulkan, libssl, ...) is missing.
 RUN ! ldd /opt/llama.cpp/llama-server /opt/llama.cpp/*.so | grep 'not found'
 COPY --from=models-stage /models /models
+COPY --from=searxng-stage /opt/searxng /opt/searxng
 
 COPY model_specs /app/model_specs
-COPY wyoming_voice.py verify_gguf.py llm_slot_cache.py entrypoint.sh /app/
+COPY wyoming_voice.py verify_gguf.py llm_slot_cache.py web_search_mcp.py entrypoint.sh /app/
 RUN chmod +x /app/entrypoint.sh
 
 # Defaults, all overridable at runtime (env) -- see entrypoint.sh.
@@ -133,5 +153,6 @@ ENV STT_MODEL_FILENAME=${STT_MODEL_FILENAME:-parakeet-ctc-0.6b-q8_0.gguf} \
     LLM_FAMILY=${LLM_FAMILY}
 
 # 10300: Wyoming (STT + TTS). 8080: llama-server, only when an LLM is set.
-EXPOSE 10300 8080
+# 8090: web search MCP endpoint, only with SEARCH_ENABLED=on.
+EXPOSE 10300 8080 8090
 ENTRYPOINT ["/app/entrypoint.sh"]

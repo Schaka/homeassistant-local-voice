@@ -24,6 +24,8 @@ on a 5-10 € AMD **R7 250 (2 GB, GCN 1.0)** that most people would consider e-w
 - **Optional local agent**: on a bigger GPU or an iGPU, the same image can
   also run the agent with llama.cpp (MiniCPM5 or Ling-3.0-tiny). See
   [Local conversation agent](#local-conversation-agent-optional).
+- **Optional web search**: SearXNG and a one-tool MCP server for the
+  agent, off by default. See [Web search](#web-search-optional).
 
 ## Verified on hardware
 
@@ -320,6 +322,49 @@ Results:
   used 1568 tokens. `LLM_REASONING_BUDGET` limits this to 512 tokens by default.
 - MTP speculative decoding stays off. For Ling-3.0-tiny it hangs on RADV
   (llama.cpp PR #26608).
+
+## Web search (optional)
+
+The image can also give the conversation agent a web search tool. It runs
+[SearXNG](https://github.com/searxng/searxng) (a private metasearch engine)
+inside the container and a small MCP server (`web_search_mcp.py`) in front of
+it. MCP (Model Context Protocol) is the standard way for Home Assistant to add
+tools from other programs to an agent.
+
+The MCP server offers one tool, `web_search`. It returns at most three short
+results, about 170 tokens. Generic search MCP servers offer several tools with
+long descriptions and can return whole web pages. That costs a small model on
+a CPU many seconds of prefill per question.
+
+Search is off by default. To turn it on, set `SEARCH_ENABLED=on` and publish
+port 8090:
+
+```bash
+docker run -d --name wyoming-voice \
+  ... \
+  -e SEARCH_ENABLED=on -p 8090:8090 \
+  ghcr.io/schaka/homeassistant-local-voice:latest
+```
+
+Then connect it in Home Assistant:
+
+1. Go to Settings > Devices & services > Add Integration > Model Context Protocol.
+2. Set the URL to `http://<host>:8090/mcp`.
+3. Open the conversation agent options and add the new MCP server to the
+   LLM APIs next to Assist.
+4. Tell the agent in its prompt when to search, for example: "For news or
+   facts outside this home, call web_search."
+
+| variable | default | purpose |
+|---|---|---|
+| `SEARCH_ENABLED` | `off` | `on` starts SearXNG and the MCP server |
+| `SEARCH_MCP_PORT` | `8090` | port of the MCP endpoint `/mcp` |
+| `SEARCH_LANGUAGE` | `en` | language of the results, for example `de`. Empty gives all languages |
+
+SearXNG listens on 127.0.0.1 only, and the image adds about 130 MB for it.
+The MCP endpoint has no authentication. Do not publish port 8090 outside your
+LAN. A search took 0.8 s in a test. Some search engines block SearXNG now and
+then (for example with a CAPTCHA), and SearXNG then uses the other engines.
 
 ## Using bigger models
 

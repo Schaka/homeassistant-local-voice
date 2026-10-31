@@ -57,6 +57,14 @@ export LLM_API_KEY="${LLM_API_KEY:-}"           # empty = accept any/no key
 export LLM_EXTRA_ARGS="${LLM_EXTRA_ARGS:-}"
 export LLM_SLOT_CACHE="${LLM_SLOT_CACHE:-on}"     # on | off (keep the prompt cache across restarts)
 
+# Web search (optional): SearXNG on 127.0.0.1 plus a one-tool MCP server
+# (web_search_mcp.py) for the Home Assistant "Model Context Protocol"
+# integration at http://<host>:${SEARCH_MCP_PORT}/mcp.
+export SEARCH_ENABLED="${SEARCH_ENABLED:-off}"   # on | off
+export SEARCH_MCP_PORT="${SEARCH_MCP_PORT:-8090}"
+export SEARCH_LANGUAGE="${SEARCH_LANGUAGE-en}"   # result language, e.g. en or de; empty = all
+export SEARXNG_PORT_INTERNAL=8888
+
 # Reject a truncated/corrupt model before it reaches the native loader -- a
 # short download still has a syntactically valid GGUF header (metadata sits
 # at the front of the file), and parakeet.cpp/audio.cpp trust that header's
@@ -232,6 +240,40 @@ if [ -n "${LLM_MODEL_FILENAME}" ] || [ -n "${LLM_HF_REPO}" ]; then
 else
   LLM_SLOT_CACHE=off
 fi
+
+case "${SEARCH_ENABLED}" in
+  on)
+    # SearXNG wants a secret for its session cookies. Nothing here is
+    # persistent, so a new random one per start is fine. The JSON format is
+    # what the MCP server reads; the limiter and the image proxy are off
+    # because only the local MCP server talks to it.
+    mkdir -p /tmp/searxng
+    cat > /tmp/searxng/settings.yml <<YAML
+use_default_settings: true
+general:
+  instance_name: "voice search"
+server:
+  bind_address: "127.0.0.1"
+  port: ${SEARXNG_PORT_INTERNAL}
+  secret_key: "$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+  limiter: false
+  image_proxy: false
+search:
+  safe_search: 1
+  formats: [html, json]
+YAML
+    run_one "searxng" env SEARXNG_SETTINGS_PATH=/tmp/searxng/settings.yml \
+      PYTHONPATH=/opt/searxng/src /opt/searxng/venv/bin/python -m searx.webapp &
+    run_one "web-search-mcp" python3 /app/web_search_mcp.py \
+      --searxng "http://127.0.0.1:${SEARXNG_PORT_INTERNAL}" \
+      --port "${SEARCH_MCP_PORT}" --language "${SEARCH_LANGUAGE}" &
+    ;;
+  off) ;;
+  *)
+    echo "FATAL: unknown SEARCH_ENABLED=${SEARCH_ENABLED} (expected on or off)" >&2
+    exit 1
+    ;;
+esac
 
 # On SIGTERM (incl. GPU-fault self-restart from wyoming_voice.py), stop the
 # whole container so the orchestrator's restart policy brings it back fresh.
