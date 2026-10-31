@@ -144,6 +144,8 @@ If a backup tool stops the container every night, the cache survives, but voice 
 
 After a tool result, the original Ling template starts the answer with an open `<think>`. Ling then often writes its answer at once and never closes the block. llama-server then returns the answer as thinking (`reasoning_content`), and the reply text is empty. In a replay of recorded Home Assistant requests, this happened in 3 of 3 tries for one request. With the patched template `templates/ling3.jinja`, the turn after a tool result starts with a closed `<think></think>`, and the problem did not occur. Ling still thinks after a user message, where it decides which tool to call.
 
+Upstream status: llama.cpp b11057 added a Ling 3.0 parser for a tool call inside an unclosed thinking block (issue #27462). It does not cover a plain answer without `</think>`, which is the case that the patched template fixes. The case can be reported in that issue with a recorded request, and the template patch can go to the model's Hugging Face repository.
+
 ## Thinking guard
 
 Ling does not need the guard with the patched template. The guard is an option for other models that show the same problem.
