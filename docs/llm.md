@@ -58,36 +58,51 @@ Other OpenAI-compatible clients use the same URL, for example the "llama.cpp ser
 
 ## Supported models
 
-`LLM_FAMILY` selects the sampling values that the model card recommends and, for Ling, the patched chat template. If it is empty, the image detects the family from the model name. For any other model, set it.
+`LLM_FAMILY` selects the sampling values from the model card and, for Ling, the patched chat template. If it is empty, the image detects the family from the model name. For any other model, set it.
 
-| `LLM_FAMILY` | Model | Architecture |
+| `LLM_FAMILY` | Model | Type | Thinking |
+|---|---|---|---|
+| `ling3` | Ling-3.0-tiny | 7.9B MoE, 1.3B active per token | Yes |
+| `minicpm5` | MiniCPM5-2B (and 1B, not recommended) | 2B dense | Yes |
+| `lfm3` | LFM3-1.7B | 1.7B dense, mostly convolution layers | Yes |
+| `qwen35` | Qwen3.5-4B | 4B dense | Yes |
+| `granite4` | Granite 4.0 H Tiny (and H Micro, not tested) | 7B MoE, about 1B active per token, mostly Mamba-2 layers | No |
+
+For the models with thinking, the thinking text goes to `reasoning_content`, so TTS does not speak it. Thinking adds time before the reply. `LLM_REASONING=off` turns it off, and `LLM_REASONING_BUDGET` (default 512 tokens) limits it.
+
+### Set the sampling in Home Assistant
+
+The llama.cpp integration of Home Assistant sends a temperature and a top-p value with each request. These override the values of the image. With "Recommended model settings" on, Home Assistant sends temperature 0.7 and top-p 1.0, which fit only some models. Turn "Recommended model settings" off in the options of the conversation agent, and set the values of the model. [model-comparison.md](model-comparison.md) has the results for the values in the test:
+
+| Model | Temperature and Top P in the test | Model card |
 |---|---|---|
-| `ling3` | Ling-3.0-tiny (7.9B MoE, 1.3B parameters active per token) | `bailingmoe3` |
-| `granite4` | IBM Granite 4.0 H Tiny (7B MoE, about 1B parameters active per token). H Micro (3B) uses the same family, but was not tested. | `granitehybrid` (Mamba-2 and attention layers) |
+| Ling-3.0-tiny | 0.7 and 1.0 (the Home Assistant defaults) | 1.0 and 0.95 |
+| MiniCPM5-2B | 0.9 and 0.95 | 0.9 and 0.95 |
+| LFM3-1.7B | 0.1 and 1.0 | 0.1 (top-p not given) |
+| Qwen3.5-4B | 0.7 and 1.0 | 1.0 and 0.95 |
+| Granite 4.0 H Tiny | 0.7 and 1.0 | 0.0 (greedy) |
 
-Ling 3.0 is a hybrid reasoning model, and thinking is on by default. The thinking text goes to `reasoning_content`, so TTS does not speak it. Thinking adds time before the reply. `LLM_REASONING=off` turns it off, and `LLM_REASONING_BUDGET` (default 512 tokens) limits it.
+The other values of the model card (top-k, min-p, penalties) come from the image.
+
+### Files and memory
 
 The smallest supported quant is Q3. Q2, IQ2 and Q1 are not supported.
 
 | `LLM_HF_REPO` | File | LLM memory at 64k context |
 |---|---|---|
-| `bartowski/Ling-3.0-tiny-GGUF:Q3_K_M` | 3.79 GB | About 4.4 GB |
-| `bartowski/Ling-3.0-tiny-GGUF:IQ4_XS` | 4.39 GB | About 5.0 GB |
 | `inclusionAI/Ling-3.0-tiny-GGUF:Q4_K_M` | 4.82 GB | 5.1 GiB (measured) |
-| `inclusionAI/Ling-3.0-tiny-GGUF:Q6_K` | 6.50 GB | About 7.2 GB |
+| `bartowski/Ling-3.0-tiny-GGUF:Q3_K_M` | 3.79 GB | About 4.4 GB |
 | `inclusionAI/Ling-3.0-tiny-GGUF:Q8_0` | 8.41 GB | About 9.1 GB |
+| `openbmb/MiniCPM5-2B-GGUF:Q4_K_M` | 1.56 GB | About 4.7 GB |
+| `openbmb/MiniCPM5-2B-GGUF:Q8_0` | 2.68 GB | About 5.8 GB |
+| `LiquidAI/LFM3-1.7B-GGUF:Q4_K_M` | 1.10 GB | About 2 GB (estimate) |
+| `LiquidAI/LFM3-1.7B-GGUF:Q8_0` | 1.85 GB | About 2.8 GB (estimate) |
+| `unsloth/Qwen3.5-4B-GGUF:Q4_K_M` | 2.74 GB | About 4.5 GB (measured at 32k) |
+| `ibm-granite/granite-4.0-h-tiny-GGUF:Q4_K_M` | 4.23 GB | About 4.5 GB (estimate) |
 
-Granite 4.0 has no thinking mode, so `LLM_REASONING` has no effect for `granite4`. Most of its layers are Mamba-2 layers, which keep a fixed-size state instead of a KV cache. So a long Home Assistant prompt needs little memory and prefills fast.
+Add about 1.7 GB for STT and TTS (about 2.4 GB with the STT model `tdt-1.1b-q8_0`). The KV cache (the memory that holds the context) differs a lot. Ling keeps it in only 6 of its 24 layers (0.4 GiB at 64k), and LFM3 and Granite mostly use layers without a KV cache. MiniCPM5-2B needs 2.6 GiB at 64k, so `LLM_CTX=32k` halves its memory need.
 
-| `LLM_HF_REPO` | File |
-|---|---|
-| `ibm-granite/granite-4.0-h-micro-GGUF:Q4_K_M` | 1.94 GB |
-| `ibm-granite/granite-4.0-h-tiny-GGUF:Q4_K_M` | 4.23 GB |
-| `ibm-granite/granite-4.0-h-tiny-GGUF:Q8_0` | 7.39 GB |
-
-Add about 1.7 GB for STT and TTS (about 2.4 GB with the STT model `tdt-1.1b-q8_0`). Both families need little memory for the context. Ling keeps a KV cache (the memory that holds the context) in only 6 of its 24 layers: 0.4 GiB at 64k context.
-
-The bartowski repo gives the smaller Ling quants. `./scripts/download-models.sh <file>.gguf` downloads the official files with a size test, for use with `LLM_MODEL_FILENAME`.
+`./scripts/download-models.sh <file>.gguf` downloads the official files with a size test, for use with `LLM_MODEL_FILENAME`.
 
 ## Which model to use
 

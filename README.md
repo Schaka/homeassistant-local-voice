@@ -8,7 +8,7 @@ A self-hosted voice assistant backend for Home Assistant in one container. It ru
 |---|---|---|
 | Speech to text (STT) | [parakeet.cpp](https://github.com/mudler/parakeet.cpp) with NVIDIA Parakeet CTC 0.6B | On |
 | Text to speech (TTS) | [audio.cpp](https://github.com/0xShug0/audio.cpp) with PocketTTS-100M | On |
-| Conversation agent (LLM) | [llama.cpp](https://github.com/ggml-org/llama.cpp) llama-server with Ling-3.0-tiny or Granite 4.0 | Off. A model setting starts it. |
+| Conversation agent (LLM) | [llama.cpp](https://github.com/ggml-org/llama.cpp) llama-server with Ling-3.0-tiny, MiniCPM5-2B, LFM3-1.7B and others | Off. A model setting starts it. |
 | Web search tool for the agent | [SearXNG](https://github.com/searxng/searxng) and a small MCP server | Off |
 
 The image contains its own Mesa Vulkan drivers (RADV for AMD, ANV for Intel, llvmpipe for the CPU). You do not install drivers, ROCm or CUDA on the host.
@@ -55,6 +55,7 @@ If the host has no GPU, the container uses the CPU. Speech is then slower but wo
 |---|---|
 | [docs/voice.md](docs/voice.md) | STT and TTS: models, other languages and voices, GPU notes, podman, test clients |
 | [docs/llm.md](docs/llm.md) | The conversation agent: cloud models, the local LLM, supported models, Vulkan or CPU, prompt cache |
+| [docs/model-comparison.md](docs/model-comparison.md) | Which small models work as a voice agent on a CPU, and which do not (9 models measured) |
 | [docs/search.md](docs/search.md) | The web search tool for the agent |
 | [docs/configuration.md](docs/configuration.md) | All environment variables, build arguments and ports |
 | [docs/home-llm-prompt.md](docs/home-llm-prompt.md) | A tested system prompt for the Local LLM (HomeLLM) add-on |

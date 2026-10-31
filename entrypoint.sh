@@ -47,21 +47,24 @@ if [ -n "${LLM_HF_REPO}" ]; then
   fi
 fi
 export LLM_MODEL_NAME="${LLM_MODEL_NAME:-${llm_default_name}}"
-# LLM_FAMILY: ling3 or granite4. Empty = detect from the model name; any
-# other model must name its family, because the family selects the chat
-# template (ling3 gets a patched one) and the sampling values.
+# LLM_FAMILY: ling3, minicpm5, lfm3, qwen35 or granite4. Empty = detect from
+# the model name; any other model must name its family, because the family
+# selects the chat template (ling3 gets a patched one) and the sampling values.
 export LLM_FAMILY="${LLM_FAMILY:-}"
 if [ -z "${LLM_FAMILY}" ] && [ -n "${LLM_MODEL_FILENAME}${LLM_HF_REPO}" ]; then
   case "${LLM_MODEL_FILENAME,,}${LLM_HF_REPO,,}" in
     *ling-3*)    LLM_FAMILY=ling3 ;;
+    *minicpm5*)  LLM_FAMILY=minicpm5 ;;
+    *lfm3-*)     LLM_FAMILY=lfm3 ;;
+    *qwen3.5*|*qwen3_5*) LLM_FAMILY=qwen35 ;;
     *granite-4*) LLM_FAMILY=granite4 ;;
     *)
-      echo "FATAL: set LLM_FAMILY (ling3 or granite4) for ${LLM_MODEL_FILENAME}${LLM_HF_REPO}" >&2
+      echo "FATAL: set LLM_FAMILY (ling3, minicpm5, lfm3, qwen35 or granite4) for ${LLM_MODEL_FILENAME}${LLM_HF_REPO}" >&2
       exit 1
       ;;
   esac
 fi
-# Both supported families run faster on the CPU than on an iGPU (measured on
+# The supported models run faster on the CPU than on an iGPU (Ling measured on
 # an Intel UHD 730). Vulkan0 uses the first GPU.
 export LLM_DEVICE="${LLM_DEVICE:-none}"         # "none" = CPU only
 export LLM_GPU_LAYERS="${LLM_GPU_LAYERS:-auto}" # auto = fit to free VRAM
@@ -94,10 +97,12 @@ if ! python3 /app/verify_gguf.py "${models[@]}"; then
   exit 1
 fi
 
-# Per-family llama-server defaults. Ling 3.0 is a hybrid reasoning model;
-# Granite 4.0 has no thinking mode. Ling's thinking stays on by default (the
-# model's own default); LLM_REASONING=off trades answer quality for a faster
-# spoken reply. llama-server returns the thinking in reasoning_content, so it
+# Per-family llama-server defaults. Ling 3.0, MiniCPM5, LFM3 and Qwen3.5 are
+# hybrid reasoning models; Granite 4.0 has no thinking mode. Thinking stays on
+# by default (the models' own default); LLM_REASONING=off trades answer
+# quality for a faster spoken reply. Home Assistant sends its own temperature
+# and top_p with each request, so set the same values in its agent options
+# (docs/llm.md); top_k, min_p and penalties come from here. llama-server returns the thinking in reasoning_content, so it
 # never reaches TTS. Sampling follows each model card. MTP speculative
 # decoding (--spec-type) stays off: it hangs on RADV for Ling 3.0 (llama.cpp
 # PR #26608). LLM_EXTRA_ARGS comes last, so it overrides any of these.
@@ -113,6 +118,28 @@ case "${LLM_REASONING}" in
 esac
 case "${LLM_FAMILY}" in
   "") llm_preset=() ;;  # no LLM configured
+  minicpm5)
+    # MiniCPM5 model card: one set per mode. llama.cpp's default min-p 0.05
+    # causes repetition, so it is set to 0.
+    if [ "${LLM_REASONING}" = on ]; then
+      llm_preset=(--temp 0.9 --top-p 0.95 --min-p 0)
+    else
+      llm_preset=(--temp 0.7 --top-p 0.95 --min-p 0)
+    fi
+    ;;
+  lfm3)
+    # LFM3 model card, "general (chat, tool use, agents)". Its card warns that
+    # turning thinking off works inconsistently.
+    llm_preset=(--temp 0.1 --top-k 50 --repeat-penalty 1.1)
+    ;;
+  qwen35)
+    # Qwen3.5 model card, general tasks.
+    if [ "${LLM_REASONING}" = on ]; then
+      llm_preset=(--temp 1.0 --top-p 0.95 --top-k 20 --min-p 0 --presence-penalty 1.5)
+    else
+      llm_preset=(--temp 0.7 --top-p 0.8 --top-k 20 --min-p 0 --presence-penalty 1.5)
+    fi
+    ;;
   ling3) llm_preset=(--temp 1.0 --top-p 0.95 --top-k 20)
          # Patched chat template (templates/ling3.jinja): after a tool result the
          # turn starts with a closed <think></think>, so the answer is never filed
@@ -128,23 +155,26 @@ case "${LLM_FAMILY}" in
     llm_preset=(--temp 0.0)
     ;;
   *)
-    echo "FATAL: unknown LLM_FAMILY=${LLM_FAMILY} (expected ling3 or granite4)" >&2
+    echo "FATAL: unknown LLM_FAMILY=${LLM_FAMILY} (expected ling3, minicpm5, lfm3, qwen35 or granite4)" >&2
     exit 1
     ;;
 esac
 
-# Context size. Both families are trained to 128k. 256k needs YaRN rope
-# scaling, which only Ling 3.0 documents (factor 2 over the 128k base).
+# Context size. All supported families take at least 128k. 256k: LFM3 has it
+# natively; Ling 3.0 needs YaRN rope scaling (factor 2 over its 128k base).
 case "${LLM_CTX}" in
   32k)  llm_ctx=(-c 32768) ;;
   64k)  llm_ctx=(-c 65536) ;;
   128k) llm_ctx=(-c 131072) ;;
   256k)
-    if [ "${LLM_FAMILY}" != ling3 ]; then
-      echo "FATAL: LLM_CTX=256k is only supported for LLM_FAMILY=ling3 (max 128k)" >&2
-      exit 1
-    fi
-    llm_ctx=(-c 262144 --rope-scaling yarn --rope-scale 2 --yarn-orig-ctx 131072)
+    case "${LLM_FAMILY}" in
+      ling3) llm_ctx=(-c 262144 --rope-scaling yarn --rope-scale 2 --yarn-orig-ctx 131072) ;;
+      lfm3)  llm_ctx=(-c 262144) ;;
+      *)
+        echo "FATAL: LLM_CTX=256k is only supported for LLM_FAMILY=ling3 or lfm3 (others: max 128k)" >&2
+        exit 1
+        ;;
+    esac
     ;;
   *)
     echo "FATAL: unknown LLM_CTX=${LLM_CTX} (expected 32k, 64k, 128k or 256k)" >&2

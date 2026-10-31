@@ -50,11 +50,11 @@ Set `LLM_HF_REPO` or `LLM_MODEL_FILENAME`, not both. With neither, llama-server 
 |---|---|---|
 | `LLM_HF_REPO` | empty | `<user>/<repo>[:QUANT]`. llama-server downloads the model into `/models/llm/hf` at the first start. |
 | `LLM_MODEL_FILENAME` | empty | Model file that is already in `/models/llm` |
-| `LLM_FAMILY` | empty | `ling3` or `granite4`. Selects the sampling values and, for `ling3`, the patched chat template. Empty detects the family from the model name. |
+| `LLM_FAMILY` | empty | `ling3`, `minicpm5`, `lfm3`, `qwen35` or `granite4`. Selects the sampling values and, for `ling3`, the patched chat template. Empty detects the family from the model name. |
 | `LLM_MODEL_NAME` | From the file or repo | Model name that Home Assistant shows |
-| `LLM_DEVICE` | `none` | `none` runs the LLM on the CPU, which is faster than an iGPU for both families. `Vulkan0` uses the first GPU. |
+| `LLM_DEVICE` | `none` | `none` runs the LLM on the CPU, which was faster than an Intel iGPU in the tests. `Vulkan0` uses the first GPU. |
 | `LLM_GPU_LAYERS` | `auto` | Layers on the GPU. `auto` fits the model to the free memory. |
-| `LLM_CTX` | `64k` | Context size: `32k`, `64k`, `128k` or `256k`. `256k` is only for `ling3` (YaRN rope scaling). |
+| `LLM_CTX` | `64k` | Context size: `32k`, `64k`, `128k` or `256k`. `256k` is only for `ling3` (YaRN rope scaling) and `lfm3`. |
 | `LLM_REASONING` | `on` | Thinking mode: `on` or `off` |
 | `LLM_REASONING_BUDGET` | `512` | Maximum thinking tokens per reply. `-1` removes the limit. |
 | `LLM_API_KEY` | empty | Empty accepts any key. With a value, the server accepts only that key. |

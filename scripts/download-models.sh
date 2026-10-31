@@ -23,6 +23,11 @@ HF="https://huggingface.co"
 # malformed in llama.cpp PR #26608).
 case "$LLM_FILE" in
     "") ;;
+    MiniCPM5-2B-Q4_K_M.gguf)   LLM_REPO=openbmb/MiniCPM5-2B-GGUF;       LLM_SIZE=1561318368 ;;
+    MiniCPM5-2B-Q8_0.gguf)     LLM_REPO=openbmb/MiniCPM5-2B-GGUF;       LLM_SIZE=2679710688 ;;
+    LFM3-1.7B-Q4_K_M.gguf)     LLM_REPO=LiquidAI/LFM3-1.7B-GGUF;        LLM_SIZE=1099627808 ;;
+    LFM3-1.7B-Q8_0.gguf)       LLM_REPO=LiquidAI/LFM3-1.7B-GGUF;        LLM_SIZE=1846238496 ;;
+    Qwen3.5-4B-Q4_K_M.gguf)    LLM_REPO=unsloth/Qwen3.5-4B-GGUF;        LLM_SIZE=2740937888 ;;
     granite-4.0-h-tiny-Q4_K_M.gguf) LLM_REPO=ibm-granite/granite-4.0-h-tiny-GGUF; LLM_SIZE=4230976352 ;;
     granite-4.0-h-tiny-Q8_0.gguf)   LLM_REPO=ibm-granite/granite-4.0-h-tiny-GGUF; LLM_SIZE=7390331744 ;;
     Ling-3.0-tiny-Q4_K_M.gguf) LLM_REPO=inclusionAI/Ling-3.0-tiny-GGUF; LLM_SIZE=4823894944 ;;
