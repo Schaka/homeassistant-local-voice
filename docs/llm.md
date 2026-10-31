@@ -78,7 +78,7 @@ The llama.cpp integration of Home Assistant sends a temperature and a top-p valu
 |---|---|---|
 | Ling-3.0-tiny | 0.7 and 1.0 (the Home Assistant defaults) | 1.0 and 0.95 |
 | MiniCPM5-2B | 0.9 and 0.95 | 0.9 and 0.95 |
-| LFM3-1.7B | 0.1 and 1.0 | 0.1 (top-p not given) |
+| LFM3-1.7B | 0.1 and 1.0, thinking on | 0.1 (top-p not given) |
 | Qwen3.5-4B | 0.7 and 1.0 | 1.0 and 0.95 |
 | Granite 4.0 H Tiny | 0.7 and 1.0 | 0.0 (greedy) |
 
@@ -106,7 +106,13 @@ Add about 1.7 GB for STT and TTS (about 2.4 GB with the STT model `tdt-1.1b-q8_0
 
 ## Which model to use
 
-Ling-3.0-tiny on the CPU is the default and the most reliable choice that we measured. [model-comparison.md](model-comparison.md) has the test of eight models and quants through Home Assistant: correct answers, time per answer, and why the others were not chosen.
+Measured through Home Assistant on a CPU (i5-12400T), see [model-comparison.md](model-comparison.md):
+
+1. Ling-3.0-tiny Q4_K_M: the default. All answers correct, 5 to 7 s.
+2. MiniCPM5-2B Q4_K_M: good answers, 15 to 17 s, smaller file.
+3. LFM3-1.7B Q4_K_M: all answers correct, but 23 to 26 s. Keep its thinking on (`LLM_REASONING=on`, the default).
+4. Granite 4.0 H Tiny Q4_K_M: the fastest (3 s), but less reliable.
+5. Qwen3.5-4B Q4_K_M: correct, but 20 s.
 
 ## Vulkan or CPU
 
