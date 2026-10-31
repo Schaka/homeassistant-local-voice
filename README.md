@@ -56,6 +56,7 @@ If the host has no GPU, the container uses the CPU. Speech is then slower but wo
 | [docs/voice.md](docs/voice.md) | STT and TTS: models, other languages and voices, GPU notes, podman, test clients |
 | [docs/llm.md](docs/llm.md) | The conversation agent: cloud models, the local LLM, supported models, Vulkan or CPU, prompt cache |
 | [docs/model-comparison.md](docs/model-comparison.md) | Which small models work as a voice agent on a CPU, and which do not (9 models measured) |
+| [docs/igpu-backends.md](docs/igpu-backends.md) | Intel iGPU: Vulkan, SYCL and OpenVINO compared, flash attention, power on the UHD 730 |
 | [docs/search.md](docs/search.md) | The web search tool for the agent |
 | [docs/configuration.md](docs/configuration.md) | All environment variables, build arguments and ports |
 | [docs/home-llm-prompt.md](docs/home-llm-prompt.md) | A tested system prompt for the Local LLM (HomeLLM) add-on |

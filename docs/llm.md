@@ -116,14 +116,15 @@ Measured through Home Assistant on a CPU (i5-12400T), see [model-comparison.md](
 
 ## Vulkan or CPU
 
-Both families run on the CPU by default (`LLM_DEVICE=none`). On an Intel UHD 730 iGPU, Ling-3.0-tiny runs fully on Vulkan, but it is slower there than on the CPU:
+The LLM runs on the CPU by default (`LLM_DEVICE=none`). On the Intel UHD 730 iGPU of an i5-12400T, Ling-3.0-tiny runs fully on Vulkan, but it generates much slower there than on the CPU:
 
-| Ling-3.0-tiny Q4_K_M | Prefill | Generation |
+| Ling-3.0-tiny Q4_K_M, 5,800-token prompt | Prefill | Generation |
 |---|---|---|
-| Intel iGPU (Vulkan) | 38 tokens/s | 11 tokens/s |
-| Desktop CPU | 101 to 140 tokens/s | 31 to 35 tokens/s |
+| CPU, 6 threads | 125 tokens/s | 33 tokens/s |
+| UHD 730 (Vulkan), `-fa off` | 92 tokens/s | 10 tokens/s |
+| UHD 730 (Vulkan), flash attention on | 29 tokens/s | 11 tokens/s |
 
-On a dedicated GPU with enough memory, `LLM_DEVICE=Vulkan0` can be faster.
+If you use a GPU, set `LLM_EXTRA_ARGS=-fa off`. On a newer iGPU (Arrow Lake) or a dedicated GPU with enough memory, `LLM_DEVICE=Vulkan0` can be faster than the CPU. [igpu-backends.md](igpu-backends.md) has all measurements, also for SYCL and OpenVINO.
 
 An Assist prompt with all tools has about 4,500 to 7,000 tokens. The first request prefills all of it, which takes 30 to 70 s on a CPU. `python3 scripts/test/llm_client.py "Turn on the kitchen light." --devices 100` sends such a prompt for a test.
 

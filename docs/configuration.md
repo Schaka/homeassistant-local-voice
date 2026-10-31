@@ -58,7 +58,7 @@ Set `LLM_HF_REPO` or `LLM_MODEL_FILENAME`, not both. With neither, llama-server 
 | `LLM_REASONING` | `on` | Thinking mode: `on` or `off` |
 | `LLM_REASONING_BUDGET` | `512` | Maximum thinking tokens per reply. `-1` removes the limit. |
 | `LLM_API_KEY` | empty | Empty accepts any key. With a value, the server accepts only that key. |
-| `LLM_EXTRA_ARGS` | empty | More llama-server arguments, for example `--n-cpu-moe 8`. They come last and override the defaults. |
+| `LLM_EXTRA_ARGS` | empty | More llama-server arguments, for example `--n-cpu-moe 8`. They come last and override the defaults. On a GPU (`LLM_DEVICE=Vulkan0`), set `-fa off` (flash attention off). This is a strong recommendation: with flash attention on, an Intel iGPU prefilled Ling-3.0-tiny 3.7 times slower (79 against 294 tokens/s). For Granite and MiniCPM5, it made no difference. See [igpu-backends.md](igpu-backends.md). |
 | `LLM_SLOT_CACHE` | `on` | Keeps the prompt cache across restarts in `/models/llm/slots`. `off` disables it. |
 | `LLM_TEMPLATE_FIX` | `on` | For `ling3`: use the patched chat template `templates/ling3.jinja`. After a tool result, the turn starts with a closed thinking block, so the answer never ends up as thinking. `off` uses the template from the GGUF. |
 | `LLM_THINKING_GUARD` | `off` | Only for models without a fixed template. With thinking on: if a reply has no text and no tool call (the answer is stuck in the thinking block), `llm_guard.py` asks once more without thinking. `off` disables it. |
