@@ -322,11 +322,17 @@ class VoiceEventHandler(AsyncEventHandler):
                     self._faults.on_success()
                     if text:
                         _LOGGER.info("STT: %s", text)
-                        await self.write_event(Transcript(text=text).event())
                     else:
                         _LOGGER.warning("STT: empty transcript for %d bytes", len(self._audio))
                 else:
+                    text = ""
                     _LOGGER.warning("STT: audio-stop with no audio received")
+                # Always answer with a Transcript, also an empty one. Home Assistant
+                # waits for this event; without it the pipeline never ends and the
+                # satellite stays in "listening" (seen for 11 minutes on 2026-10-31).
+                # An empty text makes Home Assistant end the run with
+                # "no text recognized".
+                await self.write_event(Transcript(text=text).event())
             except Exception as err:
                 _LOGGER.error("STT failed: %s", err)
                 self._faults.on_failure(err)
