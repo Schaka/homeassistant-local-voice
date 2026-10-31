@@ -32,7 +32,12 @@ RUN git clone --depth 1 https://github.com/google/shaderc /shaderc \
     && glslc --version | head -1
 RUN git clone --depth 1 https://github.com/0xShug0/audio.cpp /audio.cpp
 WORKDIR /audio.cpp
-RUN ./scripts/build_linux.sh --backend vulkan --model-set custom --models pocket_tts \
+# --native-cpu OFF: the default (-march=native) bakes in the ISA of the build
+# machine. A CI runner with AVX-512 produced a binary that died with SIGILL in
+# ggml_cpu_init on CPUs without it (i5-12400T). OFF gives the portable ggml
+# baseline (AVX2/FMA/F16C), which is enough for the small CPU part of TTS.
+RUN ./scripts/build_linux.sh --backend vulkan --native-cpu OFF \
+        --model-set custom --models pocket_tts \
         --target audiocpp_cli --target audiocpp_server
 
 # ============================================================================
