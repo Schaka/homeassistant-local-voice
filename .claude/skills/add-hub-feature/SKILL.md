@@ -1,6 +1,6 @@
 ---
 name: add-hub-feature
-description: Add new functionality to assistant-hub, for example a new route, an MCP tool, a search, a background service or a native inference engine. Covers the design rules, where the code goes, concurrency, native libraries, configuration, tests (unit, fake servers, live and evaluation tests), documentation and the checks before a push.
+description: Use when the user asks for a new feature of the voice server assistant-hub, such as a route, an MCP tool, a search, a background service, a configuration variable or a native inference engine, and when you edit src/server.rs, src/mcp.rs, src/config.rs or add a module under src/. Covers the design rules, where the code goes, concurrency, native libraries, configuration, tests (unit, fake servers, live and evaluation tests), documentation and the checks before a push. Not for version bumps, see bump-native-engine.
 ---
 
 # Add a feature to assistant-hub

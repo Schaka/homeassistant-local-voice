@@ -46,7 +46,7 @@ CI runs the first three, a release build and `cargo deny check all`. All must pa
 
 ### Skills
 
-`.claude/skills/` has step-by-step procedures. Claude Code loads them by itself. Other agents read them as documents.
+`.claude/skills/` has step-by-step procedures. Claude Code loads a skill by itself when its description matches the task, so each description starts with "Use when" and names the situations. Keep it so when you add or change a skill. Other agents read the skills as documents.
 
 | Skill | Use it to |
 |---|---|

@@ -1,6 +1,6 @@
 ---
 name: bump-native-engine
-description: Update a pinned upstream component of the image (llama.cpp, parakeet.cpp, audio.cpp, SearXNG, the Rust toolchain, cargo-chef) and check that nothing broke. Use it for version bumps and for Dependabot pull requests.
+description: Use when a pinned upstream version changes. That means the pull request of the workflow Bump pins (branch bump/pins), a Dependabot pull request, a request to update llama.cpp, parakeet.cpp, audio.cpp, SearXNG, the Rust toolchain or cargo-chef, an edit of LLAMACPP_BUILD, AUDIOCPP_COMMIT, PARAKEET_VERSION, SEARXNG_COMMIT, RUST_VERSION or CARGO_CHEF_VERSION in docker-bake.hcl, and a failed Image or CI run right after such a bump. Reads the release notes, checks the code that depends on the component and tests the image.
 ---
 
 # Bump a pinned component
