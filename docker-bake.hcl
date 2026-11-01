@@ -71,12 +71,12 @@ variable "STT_MODEL_NAME" { default = "parakeet-ctc-0.6b" }
 # Optional conversation agent. llama.cpp is a pinned prebuilt Vulkan release.
 # No LLM model is baked by default. Mount one under /models/llm or set
 # LLM_HF_REPO (docs/llm.md).
-variable "LLAMACPP_BUILD" { default = "b11966" }
+variable "LLAMACPP_BUILD" { default = "b12032" }
 # Pinned sources. The workflow "Bump pins" opens a pull request for each newer
 # upstream version (scripts/bump-pins.sh). Test the image before you merge it.
-variable "AUDIOCPP_COMMIT" { default = "bd02977fc1fd7a03087f271b2d62cd2ea1bfc0aa" }
-variable "PARAKEET_VERSION" { default = "v0.5.0" }
-variable "SEARXNG_COMMIT" { default = "ff8f5ddcc9f2c58d8b0276ec030f6a3adfa17525" }
+variable "AUDIOCPP_COMMIT" { default = "c0cd77fa80285f8113883e0de06ffc781cf502f6" }
+variable "PARAKEET_VERSION" { default = "v0.6.1" }
+variable "SEARXNG_COMMIT" { default = "9ded3bec1ae0b92e6abe40d27e1ca38d1906abbe" }
 # Keep in sync with rust-toolchain.toml.
 variable "RUST_VERSION" { default = "1.99.1" }
 # cargo-chef image tag: <CARGO_CHEF_VERSION>-rust-<RUST_VERSION>-slim-trixie.

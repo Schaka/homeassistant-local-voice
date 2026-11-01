@@ -117,10 +117,10 @@ The Dockerfile bakes models and pins versions with these arguments. `docker-bake
 | `LLM_MODEL_URL` | empty | LLM file to bake into the image. Empty bakes none. |
 | `LLM_MODEL_FILENAME` | empty | File name of the baked LLM |
 | `LLM_FAMILY` | empty | Default of the variable `LLM_FAMILY` |
-| `LLAMACPP_BUILD` | `b11966` | llama.cpp release that the image contains |
-| `SEARXNG_COMMIT` | `ff8f5ddcc9f2c58d8b0276ec030f6a3adfa17525` | SearXNG commit that the image contains |
-| `AUDIOCPP_COMMIT` | `bd02977fc1fd7a03087f271b2d62cd2ea1bfc0aa` | audio.cpp commit that the image builds |
-| `PARAKEET_VERSION` | `v0.5.0` | parakeet.cpp release that the image contains |
+| `LLAMACPP_BUILD` | `b12032` | llama.cpp release that the image contains |
+| `SEARXNG_COMMIT` | `9ded3bec1ae0b92e6abe40d27e1ca38d1906abbe` | SearXNG commit that the image contains |
+| `AUDIOCPP_COMMIT` | `c0cd77fa80285f8113883e0de06ffc781cf502f6` | audio.cpp commit that the image builds |
+| `PARAKEET_VERSION` | `v0.6.1` | parakeet.cpp release that the image contains |
 | `RUST_VERSION` | `1.99.1` | Rust toolchain of the build. Keep it the same as in `rust-toolchain.toml`. |
 
 The full STT and TTS URLs start with `https://huggingface.co/`. The TTS URLs are in the repo `audio-cpp/audio.cpp-gguf`.

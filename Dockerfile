@@ -21,7 +21,7 @@ ARG DEBIAN_VERSION=trixie
 # Debian ships glslc, so shaderc is not built from source.
 # ============================================================================
 FROM debian:${DEBIAN_VERSION}-slim AS audiocpp-builder
-ARG AUDIOCPP_COMMIT=bd02977fc1fd7a03087f271b2d62cd2ea1bfc0aa
+ARG AUDIOCPP_COMMIT=c0cd77fa80285f8113883e0de06ffc781cf502f6
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         git cmake ninja-build g++ python3 python3-venv ca-certificates curl \
         glslc libvulkan-dev spirv-headers \
@@ -40,7 +40,7 @@ RUN ./scripts/build_linux.sh --backend vulkan --native-cpu OFF \
 # parakeet.cpp: prebuilt Vulkan C library from the GitHub release.
 # ============================================================================
 FROM debian:${DEBIAN_VERSION}-slim AS parakeet-stage
-ARG PARAKEET_VERSION=v0.5.0
+ARG PARAKEET_VERSION=v0.6.1
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends curl ca-certificates \
     && curl -fsSL "https://github.com/mudler/parakeet.cpp/releases/download/${PARAKEET_VERSION}/parakeet-${PARAKEET_VERSION}-lib-linux-vulkan-x64.tar.gz" | tar xz \
     && mv "/parakeet-${PARAKEET_VERSION}-lib-linux-vulkan-x64/libparakeet.so" /libparakeet.so \
@@ -54,7 +54,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
 # ggml inside libparakeet.so or audiocpp_server.
 # ============================================================================
 FROM debian:${DEBIAN_VERSION}-slim AS llamacpp-stage
-ARG LLAMACPP_BUILD=b11966
+ARG LLAMACPP_BUILD=b12032
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends curl ca-certificates \
     && curl -fsSL "https://github.com/ggml-org/llama.cpp/releases/download/${LLAMACPP_BUILD}/llama-${LLAMACPP_BUILD}-bin-ubuntu-vulkan-x64.tar.gz" | tar xz \
     && mv "/llama-${LLAMACPP_BUILD}" /llama.cpp \
@@ -96,7 +96,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
 # the Python of the runtime base (3.13 on trixie). Its web server never runs.
 # ============================================================================
 FROM debian:${DEBIAN_VERSION}-slim AS searxng-stage
-ARG SEARXNG_COMMIT=ff8f5ddcc9f2c58d8b0276ec030f6a3adfa17525
+ARG SEARXNG_COMMIT=9ded3bec1ae0b92e6abe40d27e1ca38d1906abbe
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         python3 python3-venv git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
