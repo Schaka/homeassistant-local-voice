@@ -1,6 +1,6 @@
 # homeassistant-local-voice
 
-A self-hosted voice assistant backend for Home Assistant in one container and on one port. One Rust server (`assistant-hub`) answers Wyoming STT and TTS, the conversation agent under `/llm`, MCP tools on `/mcp`, and web and YouTube searches. It uses Vulkan on almost any GPU. Without a GPU, it uses the CPU.
+A self-hosted voice assistant backend for Home Assistant in one container and on one port. One Rust server (`assistant-hub`) answers all requests. It serves Wyoming STT and TTS, the conversation agent under `/llm`, MCP tools on `/mcp`, and web and YouTube searches. It uses Vulkan on almost any GPU. Without a GPU, it uses the CPU.
 
 ## Features
 

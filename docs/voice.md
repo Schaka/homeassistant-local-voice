@@ -66,7 +66,7 @@ mkdir -p /srv/voice-models/stt
 curl -L -o /srv/voice-models/stt/parakeet-ctc-1.1b-q8_0.gguf \
   https://huggingface.co/mudler/parakeet-cpp-gguf/resolve/main/ctc-1.1b-q8_0.gguf
 
-docker run -d --name wyoming-voice \
+docker run -d --name assistant-hub \
   -v /srv/voice-models/stt:/models/stt \
   -e STT_MODEL_FILENAME=parakeet-ctc-1.1b-q8_0.gguf \
   -e STT_MODEL_NAME=parakeet-ctc-1.1b \
