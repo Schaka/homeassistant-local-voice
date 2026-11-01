@@ -32,6 +32,7 @@ A client that sends nothing for 30 s is dropped.
 | `POST /mcp` | MCP server (Streamable HTTP, JSON responses) with all tools. A new tool is one more entry in `src/mcp.rs`, not a new endpoint. |
 | `GET /web/search?q=...&max_results=3` | Web search as JSON: the query as sent, the text that the MCP tool returns, and the results. |
 | `GET /youtube/search?q=...` | One YouTube video to play, as JSON: `kind`, `video_id`, `title`, `channel`, `url`. See [search.md](search.md). |
+| `GET /jellyfin/search?q=...` | One episode or movie of the Jellyfin library to play, as JSON. See [search.md](search.md#jellyfin-search). |
 
 ## Wyoming
 
@@ -49,7 +50,8 @@ STT and TTS share one GPU lock, so they never run on the GPU at the same time. T
 | `src/wyoming/` | Wyoming framing and the STT and TTS handler |
 | `src/stt.rs`, `src/tts.rs`, `src/audio.rs`, `src/gpu.rs` | parakeet.cpp binding, audiocpp client and text cleanup, PCM and WAV, GPU detection and GPU lock |
 | `src/llm/` | llama-server arguments per model family, the proxy, the prompt cache |
-| `src/search.rs`, `src/youtube.rs`, `src/mcp.rs` | SearXNG through PyO3, YouTube search, MCP |
+| `src/search.rs`, `src/youtube.rs`, `src/jellyfin.rs`, `src/mcp.rs` | SearXNG through PyO3, YouTube search, Jellyfin search, MCP |
+| `src/text.rs` | Matching of spoken names against titles |
 | `src/supervisor.rs` | Child processes |
 | `src/gguf.rs` | Check for truncated model files before the engines load them |
 | `src/probe.rs` | `assistant-hub probe describe|stt|tts` and `assistant-hub healthcheck` |

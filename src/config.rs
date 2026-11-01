@@ -19,6 +19,7 @@ pub struct Config {
     pub llm: Option<LlmConfig>,
     pub search: Option<SearchConfig>,
     pub youtube: Option<YoutubeConfig>,
+    pub jellyfin: Option<JellyfinConfig>,
 }
 
 #[derive(Debug, Clone)]
@@ -194,6 +195,24 @@ pub struct SearchConfig {
     pub settings_path: PathBuf,
 }
 
+#[derive(Clone)]
+pub struct JellyfinConfig {
+    pub url: String,
+    pub api_key: String,
+    /// The user whose "next up" list counts. A request can name another one.
+    pub user: String,
+}
+
+// The API key stays out of debug output.
+impl std::fmt::Debug for JellyfinConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("JellyfinConfig")
+            .field("url", &self.url)
+            .field("user", &self.user)
+            .finish_non_exhaustive()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct YoutubeConfig {
     pub language: String,
@@ -296,6 +315,7 @@ impl Config {
             llm: Self::llm_from_env()?,
             search: Self::search_from_env()?,
             youtube: Self::youtube_from_env()?,
+            jellyfin: Self::jellyfin_from_env()?,
         })
     }
 
@@ -364,6 +384,16 @@ impl Config {
             python_paths: env::split_paths(&paths).collect(),
             settings_path: PathBuf::from("/tmp/searxng-settings.yml"),
         }))
+    }
+
+    fn jellyfin_from_env() -> Result<Option<JellyfinConfig>> {
+        let (Some(url), Some(api_key)) = (var("JELLYFIN_URL"), var("JELLYFIN_API_KEY")) else {
+            return Ok(None);
+        };
+        let Some(user) = var("JELLYFIN_USER") else {
+            bail!("set JELLYFIN_USER (the Jellyfin user whose next episodes count)");
+        };
+        Ok(Some(JellyfinConfig { url, api_key, user }))
     }
 
     fn youtube_from_env() -> Result<Option<YoutubeConfig>> {

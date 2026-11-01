@@ -8,6 +8,7 @@ mod audio;
 mod config;
 mod gguf;
 mod gpu;
+mod jellyfin;
 mod llm;
 mod mcp;
 mod probe;
@@ -15,6 +16,7 @@ mod search;
 mod server;
 mod stt;
 mod supervisor;
+mod text;
 mod tts;
 mod wyoming;
 mod youtube;
@@ -253,6 +255,11 @@ async fn run(cfg: Config) -> Result<bool> {
         None => None,
     };
 
+    let jellyfin = match cfg.jellyfin.clone() {
+        Some(j) => Some(Arc::new(jellyfin::Jellyfin::new(j)?)),
+        None => None,
+    };
+
     let voice = Arc::new(wyoming::Voice {
         stt,
         tts,
@@ -268,6 +275,7 @@ async fn run(cfg: Config) -> Result<bool> {
         },
         web_search,
         youtube,
+        jellyfin,
     });
 
     let listener = tokio::net::TcpListener::bind(cfg.listen)

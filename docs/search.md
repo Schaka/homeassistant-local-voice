@@ -1,4 +1,4 @@
-# Web search and YouTube search
+# Web search, YouTube search and Jellyfin search
 
 ## Web search for the agent
 
@@ -51,6 +51,32 @@ It uses InnerTube, the API behind the YouTube website. It needs no key. It only 
 | Anything else | The first video that is no Short and no upcoming premiere | `video` or `live` |
 
 If nothing fits, the answer is 404 (`no_result`). If YouTube fails, the answer is 502. A change of the YouTube API needs a fix in `src/youtube.rs`. Its tests use real answers in `tests/fixtures/`.
+
+## Jellyfin search
+
+`GET /jellyfin/search?q=<query>[&user=<name>]` returns one episode or movie of your Jellyfin library to play:
+
+```json
+{"kind": "episode", "query": "spy family", "item_id": "<32 hex>",
+ "title": "Spy x Family", "episode_title": "Will They Pass or Fail?", "season": 1, "episode": 5,
+ "resume_seconds": 599, "user": "alex", "user_id": "<32 hex>", "server_id": "<32 hex>"}
+```
+
+| Query | Pick | `kind` |
+|---|---|---|
+| A series, for example "spy family" | The next episode of the user ("next up"), with the resume position. If the user watched everything, the first episode. | `episode` |
+| A series with "season 2 episode 3" | That episode | `episode` |
+| A movie, for example "dune part two" | The movie. Of a film series ("lord of the rings"), the oldest movie that the user did not watch. | `movie` |
+
+Jellyfin's own search needs the title words in order, so it does not find "Spy x Family" for "spy family". The server keeps the list of all series and movie titles (refreshed every 10 minutes, about 1 s for 900 titles) and matches the spoken words against it:
+
+1. The whole title, with spoken numbers as digits ("dune part two" is "Dune: Part Two").
+2. The title before a colon ("frieren" is "Frieren: Beyond Journey's End").
+3. All words of the query are words of the title, and they are more than half of its words. The words "the", "x", "by", "and" and "of" do not count, because people and STT add or drop them ("spy by family").
+
+There is no fallback to Jellyfin's own search: it finds "Office Space" for "the office". If nothing matches, the answer is 404 (`no_result`).
+
+The apps open the item by `item_id`: Wholphin with `wholphin://play?itemId=...&position=<ms>&userId=...&serverId=...`, the official Kodi add-on with `plugin://plugin.video.jellyfin/?mode=play&id=...`. [examples/home-assistant/scripts/play_jellyfin.yaml](../examples/home-assistant/scripts/play_jellyfin.yaml) uses both.
 
 ## Variables
 

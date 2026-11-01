@@ -84,6 +84,16 @@ Set `LLM_HF_REPO` or `LLM_MODEL_FILENAME`, not both. With neither, llama-server 
 | `YOUTUBE_REGION` | `DE` | Region of the results (`gl`) |
 | `YOUTUBE_CLIENT_VERSION` | `2.20261030.00.00` | Web client version that the server reports to YouTube |
 
+## Jellyfin search
+
+Both `JELLYFIN_URL` and `JELLYFIN_API_KEY` turn on `/jellyfin/search`. [search.md](search.md#jellyfin-search) explains it.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `JELLYFIN_URL` | empty | Address of the Jellyfin server, for example `http://jellyfin.local:8096` |
+| `JELLYFIN_API_KEY` | empty | API key from Jellyfin (Dashboard > API Keys) |
+| `JELLYFIN_USER` | empty, required with the two above | The Jellyfin user whose next episode and resume position count, normally the user that is signed in on the TV box. A request can name another user with `&user=`. |
+
 ## Removed variables
 
 | Variable | Why |

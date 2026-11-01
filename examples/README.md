@@ -11,6 +11,7 @@ Working Home Assistant configuration for a voice setup with `assistant-hub`. The
 | [home-assistant/scripts/lights_on.yaml](home-assistant/scripts/lights_on.yaml) | Tool | Which lights are on, by floor and room |
 | [home-assistant/scripts/weather_forecast.yaml](home-assistant/scripts/weather_forecast.yaml) | Tool | Forecast for today, tomorrow or the week, in parts of the day |
 | [home-assistant/scripts/play_youtube.yaml](home-assistant/scripts/play_youtube.yaml) | Tool | Plays a YouTube video on an Android TV box over ADB and turns the TV on |
+| [home-assistant/scripts/play_jellyfin.yaml](home-assistant/scripts/play_jellyfin.yaml) | Tool | Plays the next episode of a series or a movie from Jellyfin: Wholphin, the Jellyfin app, or Kodi on a dual-boot box |
 | [home-assistant/scripts/tv_off.yaml](home-assistant/scripts/tv_off.yaml) | Script | Turns the TV off so that HDMI-CEC does not wake it again |
 | [home-assistant/automations/voice_good_night.yaml](home-assistant/automations/voice_good_night.yaml) | Sentence trigger | "Good night": lights, music and TV off, weather for tomorrow, no LLM |
 | [home-assistant/automations/voice_play_video.yaml](home-assistant/automations/voice_play_video.yaml) | Sentence trigger | "Play ... on the TV" goes to the LLM, which calls `play_youtube` |

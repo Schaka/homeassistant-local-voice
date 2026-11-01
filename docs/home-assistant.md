@@ -83,6 +83,7 @@ Every exposed script is a tool for the LLM. Small models make mistakes with raw 
 | [scripts/lights_on.yaml](../examples/home-assistant/scripts/lights_on.yaml) | Lists the lights that are on, grouped by floor and room. Small models count badly from the raw state list. |
 | [scripts/weather_forecast.yaml](../examples/home-assistant/scripts/weather_forecast.yaml) | High and low, then morning, afternoon and evening values for today, tomorrow or the week |
 | [scripts/play_youtube.yaml](../examples/home-assistant/scripts/play_youtube.yaml) | Plays a YouTube video on an Android TV box. Uses `/youtube/search`. |
+| [scripts/play_jellyfin.yaml](../examples/home-assistant/scripts/play_jellyfin.yaml) | Plays the next episode of a series, or a movie, from Jellyfin. Uses `/jellyfin/search`. |
 
 Write tool descriptions in plain sentences. Add one line to the prompt for each tool that the model must not miss, for example "For future weather, call weather_forecast."
 

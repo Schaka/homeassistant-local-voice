@@ -11,6 +11,7 @@ A self-hosted voice assistant backend for Home Assistant in one container and on
 | Conversation agent (LLM) | [llama.cpp](https://github.com/ggml-org/llama.cpp) llama-server with Ling-3.0-tiny, MiniCPM5-2B, LFM3-1.7B and others | Off. A model setting starts it. |
 | Web search tool for the agent | [SearXNG](https://github.com/searxng/searxng), embedded as a library (no SearXNG server) | Off |
 | YouTube search (`/youtube/search`) | YouTube's own web API (InnerTube), no key | On |
+| Jellyfin search (`/jellyfin/search`) | Your Jellyfin server: the next episode of a series or a movie | Off. `JELLYFIN_URL` and `JELLYFIN_API_KEY` turn it on. |
 
 The image contains its own Mesa Vulkan drivers (RADV for AMD, ANV for Intel). You do not install drivers, ROCm or CUDA on the host. Without a GPU, STT and TTS run on the CPU backend of ggml.
 
@@ -22,7 +23,7 @@ Home Assistant                              assistant-hub, port 10300
  │                                                 TTS (audiocpp_server, child process)
  ├─ llama.cpp integration ─────────▶  /llm/v1      llama-server (child process, optional)
  ├─ Model Context Protocol ────────▶  /mcp         tools: web_search (optional)
- └─ REST commands, scripts ────────▶  /web/search, /youtube/search, /health
+ └─ REST commands, scripts ────────▶  /web/search, /youtube/search, /jellyfin/search, /health
 ```
 
 The server sorts each connection by its first byte: a Wyoming client starts with a JSON header (`{`), an HTTP client with a method name. The native engines listen on 127.0.0.1 only. [docs/architecture.md](docs/architecture.md) explains the parts.

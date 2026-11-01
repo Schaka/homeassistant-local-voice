@@ -1,0 +1,385 @@
+//! Jellyfin search for "play ... on Jellyfin".
+//!
+//! The server finds a series or a movie in the Jellyfin library and returns
+//! the item to play. Home Assistant then opens it in an app on the TV box. The
+//! rules:
+//!
+//! 1. A series: the next episode of the user ("next up"), with its resume
+//!    position. If the user watched all episodes, the first episode. A season
+//!    and an episode number pick that episode.
+//! 2. A movie: the movie. Of several movies that match equally well (a film
+//!    series), the oldest one that the user has not watched.
+//!
+//! Jellyfin's own search needs the words of the title in order, so "spy
+//! family" does not find "Spy x Family". The server therefore keeps the list
+//! of all series and movie titles (refreshed every 10 min) and matches the
+//! spoken words against it.
+
+use std::time::{Duration, Instant};
+
+use anyhow::{Context, Result, bail};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use tokio::sync::Mutex;
+
+use crate::config::JellyfinConfig;
+use crate::text;
+
+const LIBRARY_TTL: Duration = Duration::from_secs(600);
+/// Words that people say or that STT writes between title words: "spy by
+/// family" for "Spy x Family". They are ignored in the query.
+const FILLER: &[&str] = &["the", "a", "an", "x", "by", "and", "ex", "of", "on", "jellyfin"];
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct Item {
+    pub id: String,
+    pub name: String,
+    #[serde(rename = "Type")]
+    pub kind: String,
+    #[serde(default)]
+    pub production_year: Option<i32>,
+    #[serde(default)]
+    pub user_data: UserData,
+    #[serde(default)]
+    pub parent_index_number: Option<u32>,
+    #[serde(default)]
+    pub index_number: Option<u32>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct UserData {
+    #[serde(default)]
+    pub played: bool,
+    #[serde(default)]
+    pub playback_position_ticks: u64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct Items {
+    items: Vec<Item>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Kind {
+    Episode,
+    Movie,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Pick {
+    pub kind: Kind,
+    pub query: String,
+    pub item_id: String,
+    /// The series or the movie.
+    pub title: String,
+    /// The episode title, for an episode.
+    pub episode_title: Option<String>,
+    pub season: Option<u32>,
+    pub episode: Option<u32>,
+    /// Where the user stopped, in seconds. 0 starts at the beginning.
+    pub resume_seconds: u64,
+    pub user: String,
+    /// User and server, so that an app can switch to the right account.
+    pub user_id: String,
+    pub server_id: String,
+}
+
+/// How well a title matches the query. Lower is better.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Score {
+    /// The whole title.
+    Exact,
+    /// The title before a colon: "Frieren" for "Frieren: Beyond Journey's End".
+    Main,
+    /// All query words are words of the title.
+    Words,
+}
+
+fn score(query: &str, title: &str) -> Option<Score> {
+    let q = text::squashed(query);
+    if q.is_empty() {
+        return None;
+    }
+    let main = title.split(':').next().unwrap_or(title);
+    if q == text::squashed(title) {
+        return Some(Score::Exact);
+    }
+    if q == text::squashed(main) {
+        return Some(Score::Main);
+    }
+    let wanted: Vec<String> = text::words(query)
+        .into_iter()
+        .filter(|w| !FILLER.contains(&w.as_str()))
+        .collect();
+    // All query words must be in the title (or its main part), and they must be
+    // more than half of its words: "the office" must not find "Office Space".
+    let covers = |t: &str| {
+        let have: Vec<String> = text::words(t)
+            .into_iter()
+            .filter(|w| !FILLER.contains(&w.as_str()))
+            .collect();
+        wanted.iter().all(|w| have.contains(w)) && wanted.len() * 2 > have.len()
+    };
+    (!wanted.is_empty() && (covers(title) || covers(main))).then_some(Score::Words)
+}
+
+/// The best series or movie for the query. Series win over movies at the same
+/// score. Of several movies, the oldest unwatched one wins.
+pub fn best_match<'a>(query: &str, library: &'a [Item]) -> Option<&'a Item> {
+    library
+        .iter()
+        .filter_map(|item| score(query, &item.name).map(|s| (s, item)))
+        .min_by_key(|(s, item)| {
+            (
+                *s,
+                item.kind != "Series",
+                item.user_data.played,
+                item.production_year.unwrap_or(i32::MAX),
+            )
+        })
+        .map(|(_, item)| item)
+}
+
+/// "Spy x Family season 2 episode 3" becomes ("Spy x Family", Some(2), Some(3)).
+pub fn split_episode(query: &str) -> (String, Option<u32>, Option<u32>) {
+    let words: Vec<String> = query.split_whitespace().map(str::to_owned).collect();
+    let lower: Vec<String> = text::words(query);
+    if lower.len() != words.len() {
+        return (query.trim().to_owned(), None, None);
+    }
+    let number_after = |key: &str| -> Option<(usize, u32)> {
+        let i = lower.iter().position(|w| w == key)?;
+        lower.get(i + 1)?.parse().ok().map(|n| (i, n))
+    };
+    let season = number_after("season");
+    let episode = number_after("episode");
+    let cut = [season.map(|(i, _)| i), episode.map(|(i, _)| i)]
+        .into_iter()
+        .flatten()
+        .min()
+        .unwrap_or(words.len());
+    (words[..cut].join(" "), season.map(|(_, n)| n), episode.map(|(_, n)| n))
+}
+
+pub struct Jellyfin {
+    client: reqwest::Client,
+    cfg: JellyfinConfig,
+    /// (user ID, fetched at, items) per user.
+    library: Mutex<Option<(String, Instant, Vec<Item>)>>,
+}
+
+impl Jellyfin {
+    pub fn new(cfg: JellyfinConfig) -> Result<Self> {
+        let client = reqwest::Client::builder().timeout(Duration::from_secs(15)).build()?;
+        Ok(Self {
+            client,
+            cfg,
+            library: Mutex::new(None),
+        })
+    }
+
+    async fn get<T: serde::de::DeserializeOwned>(&self, path: &str, query: &[(&str, &str)]) -> Result<T> {
+        let resp = self
+            .client
+            .get(format!("{}{path}", self.cfg.url.trim_end_matches('/')))
+            .header("Authorization", format!("MediaBrowser Token=\"{}\"", self.cfg.api_key))
+            .query(query)
+            .send()
+            .await?;
+        let status = resp.status();
+        if !status.is_success() {
+            bail!("Jellyfin {path}: HTTP {status}");
+        }
+        resp.json().await.with_context(|| format!("Jellyfin {path}: bad JSON"))
+    }
+
+    /// The ID of a user name (case does not matter).
+    async fn user_id(&self, name: &str) -> Result<String> {
+        let users: Vec<Value> = self.get("/Users", &[]).await?;
+        users
+            .iter()
+            .find(|u| u["Name"].as_str().is_some_and(|n| n.eq_ignore_ascii_case(name)))
+            .and_then(|u| u["Id"].as_str())
+            .map(str::to_owned)
+            .with_context(|| format!("no Jellyfin user {name}"))
+    }
+
+    async fn library(&self, user_id: &str) -> Result<Vec<Item>> {
+        let mut cache = self.library.lock().await;
+        if let Some((uid, at, items)) = cache.as_ref()
+            && uid == user_id
+            && at.elapsed() < LIBRARY_TTL
+        {
+            return Ok(items.clone());
+        }
+        let items: Items = self
+            .get(
+                "/Items",
+                &[
+                    ("IncludeItemTypes", "Series,Movie"),
+                    ("Recursive", "true"),
+                    ("userId", user_id),
+                    ("Fields", "ProductionYear"),
+                    ("EnableImages", "false"),
+                    ("EnableUserData", "true"),
+                ],
+            )
+            .await?;
+        tracing::info!("jellyfin: {} series and movies", items.items.len());
+        *cache = Some((user_id.to_owned(), Instant::now(), items.items.clone()));
+        Ok(items.items)
+    }
+
+    async fn episodes(&self, user_id: &str, series_id: &str) -> Result<Vec<Item>> {
+        let path = format!("/Shows/{series_id}/Episodes");
+        let list: Items = self.get(&path, &[("userId", user_id)]).await?;
+        Ok(list.items)
+    }
+
+    async fn next_up(&self, user_id: &str, series_id: &str) -> Result<Option<Item>> {
+        let list: Items = self
+            .get(
+                "/Shows/NextUp",
+                &[
+                    ("seriesId", series_id),
+                    ("userId", user_id),
+                    ("Limit", "1"),
+                    ("enableResumable", "true"),
+                ],
+            )
+            .await?;
+        Ok(list.items.into_iter().next())
+    }
+
+    /// The item to play for a spoken query. `user` overrides `JELLYFIN_USER`.
+    pub async fn search(&self, query: &str, user: Option<&str>) -> Result<Option<Pick>> {
+        let user = user.filter(|u| !u.is_empty()).unwrap_or(&self.cfg.user).to_owned();
+        let user_id = self.user_id(&user).await?;
+        let info: Value = self.get("/System/Info/Public", &[]).await?;
+        let server_id = info["Id"].as_str().unwrap_or_default().to_owned();
+        let (words, season, episode) = split_episode(query);
+        if words.is_empty() {
+            return Ok(None);
+        }
+        let library = self.library(&user_id).await?;
+        // No fallback to Jellyfin's own search: it finds "Office Space" for
+        // "the office". Nothing is a better answer than the wrong movie.
+        let Some(item) = best_match(&words, &library).cloned() else {
+            return Ok(None);
+        };
+        let pick = |ep: Option<&Item>, target: &Item| Pick {
+            kind: if ep.is_some() { Kind::Episode } else { Kind::Movie },
+            query: words.clone(),
+            item_id: target.id.clone(),
+            title: item.name.clone(),
+            episode_title: ep.map(|e| e.name.clone()),
+            season: ep.and_then(|e| e.parent_index_number),
+            episode: ep.and_then(|e| e.index_number),
+            resume_seconds: if target.user_data.played {
+                0
+            } else {
+                target.user_data.playback_position_ticks / 10_000_000
+            },
+            user: user.clone(),
+            user_id: user_id.clone(),
+            server_id: server_id.clone(),
+        };
+        if item.kind != "Series" {
+            return Ok(Some(pick(None, &item)));
+        }
+        let chosen = if season.is_some() || episode.is_some() {
+            self.episodes(&user_id, &item.id).await?.into_iter().find(|e| {
+                season.is_none_or(|s| e.parent_index_number == Some(s)) && e.index_number == Some(episode.unwrap_or(1))
+            })
+        } else {
+            match self.next_up(&user_id, &item.id).await? {
+                Some(e) => Some(e),
+                // All watched (or nothing started): the first episode.
+                None => self.episodes(&user_id, &item.id).await?.into_iter().next(),
+            }
+        };
+        Ok(chosen.map(|e| pick(Some(&e), &e)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn item(name: &str, kind: &str, year: i32, played: bool) -> Item {
+        Item {
+            id: name.to_owned(),
+            name: name.to_owned(),
+            kind: kind.to_owned(),
+            production_year: Some(year),
+            user_data: UserData {
+                played,
+                playback_position_ticks: 0,
+            },
+            parent_index_number: None,
+            index_number: None,
+        }
+    }
+
+    fn library() -> Vec<Item> {
+        vec![
+            item("Spy x Family", "Series", 2022, false),
+            item("Frieren: Beyond Journey's End", "Series", 2023, false),
+            item("Dune", "Movie", 2021, true),
+            item("Dune: Part Two", "Movie", 2024, false),
+            item("Office Space", "Movie", 1999, false),
+            item("The Lord of the Rings: The Two Towers", "Movie", 2002, false),
+            item("The Lord of the Rings: The Fellowship of the Ring", "Movie", 2001, true),
+            item("The Lord of the Rings: The Return of the King", "Movie", 2003, false),
+        ]
+    }
+
+    #[test]
+    fn spoken_titles_match() {
+        let lib = library();
+        let name = |q: &str| best_match(q, &lib).map(|i| i.name.as_str());
+        assert_eq!(name("spy x family"), Some("Spy x Family"));
+        assert_eq!(name("spy family"), Some("Spy x Family"));
+        assert_eq!(name("spy by family"), Some("Spy x Family"));
+        assert_eq!(name("spyxfamily"), Some("Spy x Family"));
+        assert_eq!(name("frieren"), Some("Frieren: Beyond Journey's End"));
+        assert_eq!(name("dune"), Some("Dune"));
+        assert_eq!(name("dune part two"), Some("Dune: Part Two"));
+        assert_eq!(name("dune part 2"), Some("Dune: Part Two"));
+        // Fellowship is watched, so the oldest unwatched one.
+        assert_eq!(name("lord of the rings"), Some("The Lord of the Rings: The Two Towers"));
+        assert_eq!(name("breaking bad"), None);
+        assert_eq!(name("the office"), None, "Office Space shares only one of two words");
+    }
+
+    #[test]
+    fn season_and_episode() {
+        assert_eq!(
+            split_episode("Spy x Family season 2 episode 3"),
+            ("Spy x Family".into(), Some(2), Some(3))
+        );
+        assert_eq!(split_episode("frieren episode five"), ("frieren".into(), None, Some(5)));
+        assert_eq!(split_episode("Dune: Part Two"), ("Dune: Part Two".into(), None, None));
+    }
+
+    /// Against a real server: `JELLYFIN_URL=... JELLYFIN_API_KEY=... JELLYFIN_USER=...
+    /// JELLYFIN_TEST_QUERY="spy family" cargo test live_server -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore = "needs a Jellyfin server"]
+    async fn live_server() {
+        let env = |k: &str| std::env::var(k).unwrap_or_default();
+        let jf = Jellyfin::new(JellyfinConfig {
+            url: env("JELLYFIN_URL"),
+            api_key: env("JELLYFIN_API_KEY"),
+            user: env("JELLYFIN_USER"),
+        })
+        .unwrap();
+        for q in env("JELLYFIN_TEST_QUERY").split(';') {
+            println!("{q:?} -> {:?}", jf.search(q, None).await.unwrap());
+        }
+    }
+}

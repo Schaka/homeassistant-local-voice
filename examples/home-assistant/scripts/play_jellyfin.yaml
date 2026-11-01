@@ -1,0 +1,71 @@
+# Tool for the LLM: plays the next episode of a series, or a movie, from
+# Jellyfin on an Android TV box and turns the TV on.
+#
+# Needs:
+#   - assistant-hub with JELLYFIN_URL, JELLYFIN_API_KEY and JELLYFIN_USER
+#   - rest_command.assistant_hub_jellyfin_search (rest_commands.yaml)
+#   - the "Android Debug Bridge" integration for the box (media_player.tv_box)
+#
+# App order: Wholphin (starts playback at the resume position), then the
+# official Jellyfin app (opens the item, then a play key). For a dual-boot box
+# with CoreELEC, see the Kodi branch in docs/search.md: Player.Open with
+# plugin://plugin.video.jellyfin/?mode=play&id=<item_id>.
+alias: Play on Jellyfin
+description: >-
+  Plays a series or a movie from Jellyfin on the TV and turns the TV on. Use it when the user
+  wants to watch a series, a show, an anime or a movie, or says Jellyfin. A series continues
+  with the next episode. Returns a sentence to say.
+mode: single
+fields:
+  query:
+    description: Only the title of the series or movie, for example "Spy x Family". Leave out "play", "on Jellyfin" and "on the TV".
+    required: true
+    example: Spy x Family
+    selector:
+      text: {}
+  season:
+    description: Season number, only if the user names one.
+    required: false
+    selector:
+      number: {min: 0, max: 100}
+  episode:
+    description: Episode number, only if the user names one.
+    required: false
+    selector:
+      number: {min: 0, max: 2000}
+variables:
+  box: media_player.tv_box
+sequence:
+  - action: rest_command.assistant_hub_jellyfin_search
+    data:
+      query: >-
+        {{ query | trim }}{{ ' season ' ~ (season | int) if season is defined and season not in ['', none] else '' }}{{ ' episode ' ~ (episode | int) if episode is defined and episode not in ['', none] else '' }}
+    response_variable: r
+    continue_on_error: true
+  - variables:
+      pick: >-
+        {% if r is defined and r.status == 200 and r.content is mapping and r.content.item_id is defined %}{{ r.content }}{% else %}{{ {'item_id': ''} }}{% endif %}
+  - if: "{{ pick.item_id == '' }}"
+    then:
+      - variables:
+          result:
+            text: I found nothing on Jellyfin for {{ query | trim }}.
+      - stop: Nothing found
+        response_variable: result
+  - alias: Wholphin first (plays at once), else the Jellyfin app (opens the item, then a play key)
+    action: androidtv.adb_command
+    data:
+      entity_id: "{{ box }}"
+      command: >-
+        if pm path com.github.damontecres.wholphin >/dev/null 2>&1; then
+        am start -n com.github.damontecres.wholphin/.MainActivity -d 'wholphin://play?itemId={{ pick.item_id }}&position={{ (pick.resume_seconds | int) * 1000 }}&userId={{ pick.user_id }}&serverId={{ pick.server_id }}';
+        elif pm path org.jellyfin.androidtv >/dev/null 2>&1; then
+        am start -n org.jellyfin.androidtv/.ui.startup.StartupActivity -a android.intent.action.VIEW -d '{{ pick.item_id }}'; sleep 8; input keyevent KEYCODE_MEDIA_PLAY;
+        fi
+  - variables:
+      result:
+        text: >-
+          {% if pick.kind == 'episode' %}Playing {{ pick.title }}, season {{ pick.season }} episode {{ pick.episode }}.
+          {%- else %}Playing {{ pick.title }}.{% endif %}
+  - stop: Done
+    response_variable: result

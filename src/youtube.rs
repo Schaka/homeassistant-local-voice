@@ -234,35 +234,6 @@ pub fn parse_uploads(answer: &Value) -> Vec<Video> {
     out
 }
 
-/// Spoken numbers as digits, so "level one techs" can match "Level1Techs".
-const NUMBER_WORDS: &[(&str, &str)] = &[
-    ("zero", "0"),
-    ("one", "1"),
-    ("two", "2"),
-    ("three", "3"),
-    ("four", "4"),
-    ("five", "5"),
-    ("six", "6"),
-    ("seven", "7"),
-    ("eight", "8"),
-    ("nine", "9"),
-    ("ten", "10"),
-];
-
-/// Lowercase letters and digits only, with spoken numbers as digits.
-fn norm(s: &str) -> String {
-    s.to_lowercase()
-        .split(|c: char| !c.is_ascii_alphanumeric())
-        .filter(|w| !w.is_empty())
-        .map(|w| {
-            NUMBER_WORDS
-                .iter()
-                .find(|(word, _)| *word == w)
-                .map_or(w, |(_, digit)| digit)
-        })
-        .collect()
-}
-
 /// True if all characters of `short` occur in `long` in the same order.
 fn is_subsequence(short: &str, long: &str) -> bool {
     let mut rest = long.chars();
@@ -304,14 +275,14 @@ pub fn analyze(query: &str) -> (String, bool) {
 /// The channel whose name or handle is the query, if the search found one.
 /// Spoken numbers and abbreviations count ("level one techs", "lvl1techs").
 pub fn matching_channel<'a>(query: &str, items: &'a [Item]) -> Option<&'a Channel> {
-    let q = norm(query);
+    let q = crate::text::squashed(query);
     let q_without_the = q.strip_prefix("the").unwrap_or(&q).to_owned();
     if q.is_empty() {
         return None;
     }
     items.iter().find_map(|item| match item {
         Item::Channel(c) => {
-            let names = [norm(&c.title), norm(&c.handle)];
+            let names = [crate::text::squashed(&c.title), crate::text::squashed(&c.handle)];
             let hit = names
                 .iter()
                 .any(|n| name_matches(&q, n) || name_matches(&q_without_the, n));

@@ -12,6 +12,7 @@
 //! | `POST /mcp` | MCP tools for the conversation agent |
 //! | `GET /web/search?q=` | Web search as JSON |
 //! | `GET /youtube/search?q=` | One YouTube video to play, as JSON |
+//! | `GET /jellyfin/search?q=&user=` | One Jellyfin episode or movie to play, as JSON |
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -30,6 +31,7 @@ use serde_json::{Value, json};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_util::sync::CancellationToken;
 
+use crate::jellyfin::Jellyfin;
 use crate::llm::proxy::LlmProxy;
 use crate::mcp::Tools;
 use crate::search::{self, SearchBackend};
@@ -42,6 +44,7 @@ pub struct AppState {
     pub tools: Tools,
     pub web_search: Option<Arc<dyn SearchBackend>>,
     pub youtube: Option<Arc<YouTube>>,
+    pub jellyfin: Option<Arc<Jellyfin>>,
 }
 
 type Shared = Arc<AppState>;
@@ -56,6 +59,7 @@ pub fn router(state: Shared) -> Router {
         .route("/mcp", any(mcp))
         .route("/web/search", get(web_search))
         .route("/youtube/search", get(youtube_search))
+        .route("/jellyfin/search", get(jellyfin_search))
         .route("/llm", any(llm))
         .route("/llm/{*rest}", any(llm))
         .fallback(|| async { json_error(StatusCode::NOT_FOUND, "not_found", "no such route") })
@@ -78,6 +82,7 @@ async fn health(State(app): State<Shared>) -> Response {
         "llm": llm,
         "web_search": app.web_search.is_some(),
         "youtube": app.youtube.is_some(),
+        "jellyfin": app.jellyfin.is_some(),
     }))
     .into_response()
 }
@@ -203,6 +208,37 @@ async fn youtube_search(State(app): State<Shared>, Query(q): Query<HashMap<Strin
     }
 }
 
+async fn jellyfin_search(State(app): State<Shared>, Query(q): Query<HashMap<String, String>>) -> Response {
+    let Some(jf) = &app.jellyfin else {
+        return json_error(
+            StatusCode::NOT_FOUND,
+            "jellyfin_off",
+            "Jellyfin search is off (JELLYFIN_URL, JELLYFIN_API_KEY)",
+        );
+    };
+    let Some(query) = q.get("q").map(|s| s.trim()).filter(|s| !s.is_empty()) else {
+        return json_error(StatusCode::BAD_REQUEST, "missing_q", "the parameter q is missing");
+    };
+    match jf.search(query, q.get("user").map(String::as_str)).await {
+        Ok(Some(pick)) => {
+            tracing::info!(
+                "jellyfin {query:?} -> {:?} {} S{:?}E{:?} at {} s",
+                pick.kind,
+                pick.title,
+                pick.season,
+                pick.episode,
+                pick.resume_seconds
+            );
+            axum::Json(pick).into_response()
+        }
+        Ok(None) => json_error(StatusCode::NOT_FOUND, "no_result", format!("nothing found for {query}")),
+        Err(err) => {
+            tracing::warn!("jellyfin {query:?}: {err:#}");
+            json_error(StatusCode::BAD_GATEWAY, "upstream", format!("{err:#}"))
+        }
+    }
+}
+
 /// A client that sends nothing within this time is dropped.
 const FIRST_BYTE_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -302,6 +338,7 @@ mod tests {
             tools: Tools::default(),
             web_search: None,
             youtube: None,
+            jellyfin: None,
         });
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
