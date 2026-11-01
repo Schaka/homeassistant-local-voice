@@ -42,6 +42,16 @@ Episodes rank only against episodes, and series and movies only against each oth
 
 The index lives in `MEDIA_INDEX_DIR` (default `/models/llm/media-index`): `entries.json` with the items and `vectors.f32` with the vectors. A change of the model, of `EMBED_DIMS`, of `MEDIA_INDEX_EPISODES` or of the text layout builds a new index.
 
+### Copy a built index to another host
+
+You can build the index on a faster machine and copy it, as long as the library, the model and `EMBED_DIMS` are the same:
+
+1. Build it there, for example with the evaluation test (`EVAL_INDEX_DIR`).
+2. In `entries.json`, set `fingerprint` to the value of the target host. The fingerprint is the file name of the model, the vector size, the text layout version and the episode setting, for example `embeddinggemma-2-Q8_0.gguf|dims=512|doc=1|episodes=true`.
+3. Stop the container, copy `entries.json` and `vectors.f32` into `MEDIA_INDEX_DIR`, and start it again.
+
+The start then compares the library and embeds only items that changed in the meantime. On the author's server, a copied index of 16,389 items was ready one minute after the start, with 0 items to embed.
+
 ## Resources
 
 | Item | Value |
