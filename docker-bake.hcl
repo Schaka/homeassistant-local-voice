@@ -68,11 +68,12 @@ variable "TTS_MODEL_ID" { default = "pocket-tts" }
 variable "TTS_VOICE_ID" { default = "alba" }
 variable "STT_MODEL_NAME" { default = "parakeet-ctc-0.6b" }
 
-# Optional conversation agent. llama.cpp is a pinned prebuilt Vulkan release
-# (bump on purpose, like parakeet.cpp v0.5.0). No LLM model is baked by
-# default. Mount one under /models/llm or set LLM_HF_REPO (docs/llm.md).
+# Optional conversation agent. llama.cpp is a pinned prebuilt Vulkan release.
+# No LLM model is baked by default. Mount one under /models/llm or set
+# LLM_HF_REPO (docs/llm.md).
 variable "LLAMACPP_BUILD" { default = "b11966" }
-# Pinned sources. Bump on purpose, then test the image.
+# Pinned sources. The workflow "Bump pins" opens a pull request for each newer
+# upstream version (scripts/bump-pins.sh). Test the image before you merge it.
 variable "AUDIOCPP_COMMIT" { default = "bd02977fc1fd7a03087f271b2d62cd2ea1bfc0aa" }
 variable "PARAKEET_VERSION" { default = "v0.5.0" }
 variable "SEARXNG_COMMIT" { default = "ff8f5ddcc9f2c58d8b0276ec030f6a3adfa17525" }

@@ -1,0 +1,122 @@
+name: Bump pins
+
+# Every Monday, and on demand: for each pinned native component with a newer
+# upstream version (scripts/bump-pins.sh), this workflow opens a pull request
+# with the new pin, starts CI on its branch and test-builds the image without a
+# push. A person reads the release notes (skill bump-native-engine) and merges.
+# The merge builds and publishes the image as for any other change.
+#
+# The repository setting "Allow GitHub Actions to create and approve pull
+# requests" (Settings > Actions > General) must be on.
+
+on:
+  schedule:
+    - cron: '17 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  # Start CI on the branch, and read the registry build cache.
+  actions: write
+  packages: read
+
+concurrency:
+  group: bump-pins
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        component: [llamacpp, audiocpp, parakeet, searxng]
+    env:
+      GH_TOKEN: ${{ github.token }}
+      COMPONENT: ${{ matrix.component }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Update the pin
+        id: bump
+        run: |
+          set -euo pipefail
+          summary="$(./scripts/bump-pins.sh "$COMPONENT")"
+          echo "$summary"
+          if git diff --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            { echo "summary<<EOF"; echo "$summary"; echo "EOF"; } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push the branch and open the pull request
+        if: steps.bump.outputs.changed == 'true'
+        env:
+          SUMMARY: ${{ steps.bump.outputs.summary }}
+        run: |
+          set -euo pipefail
+          branch="bump/$COMPONENT"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git commit -q -am "Bump $SUMMARY"
+          git push --force origin "$branch"
+          body="$(printf 'Automatic bump from `scripts/bump-pins.sh`.\n\n`%s`\n\nBefore you merge, follow the skill `bump-native-engine` for this component: read the release notes, and check the test build and CI results below.\n' "$SUMMARY")"
+          number="$(gh pr list --head "$branch" --state open --json number --jq '.[0].number // empty')"
+          if [ -n "$number" ]; then
+            gh pr edit "$number" --title "Bump $SUMMARY" --body "$body"
+          else
+            gh pr create --head "$branch" --base "${{ github.event.repository.default_branch }}" \
+              --title "Bump $SUMMARY" --body "$body"
+          fi
+          # Pushes by this workflow do not start other workflows. A dispatch does.
+          gh workflow run ci.yml --ref "$branch"
+
+      - name: Free disk space
+        if: steps.bump.outputs.changed == 'true'
+        uses: jlumbroso/free-disk-space@ceedf095f4ec1a097402bc6bd80831f2e1a6fde6 # v2.0.0
+        with:
+          tool-cache: true
+          docker-images: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+
+      - name: Set up Buildx
+        if: steps.bump.outputs.changed == 'true'
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to the registry
+        if: steps.bump.outputs.changed == 'true'
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Test build of the image (no push)
+        if: steps.bump.outputs.changed == 'true'
+        env:
+          OWNER: ${{ github.repository_owner }}
+          # Read the cache of the last published build, never write it.
+          REGISTRY_CACHE: 'true'
+        run: |
+          set -euo pipefail
+          export OWNER="${OWNER,,}"
+          docker buildx bake --print final
+          docker buildx bake final
+
+      - name: Report the result on the pull request
+        if: always() && steps.bump.outputs.changed == 'true'
+        env:
+          RESULT: ${{ job.status }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          number="$(gh pr list --head "bump/$COMPONENT" --state open --json number --jq '.[0].number // empty')"
+          if [ -n "$number" ]; then
+            gh pr comment "$number" --body "Test build of the image: **$RESULT** ($RUN_URL). CI runs as the workflow CI on this branch."
+          fi

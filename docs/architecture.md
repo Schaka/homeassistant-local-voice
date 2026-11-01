@@ -91,7 +91,8 @@ The Dockerfile has these stages, all on Debian 13 "trixie":
 
 | Workflow | Runs on | Jobs |
 |---|---|---|
-| `ci.yml` | Every push to a branch, every pull request | `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, a release build (all `--locked`), and `cargo deny check all` (RustSec advisories, licenses, bans, sources) |
+| `ci.yml` | Every push to a branch, every pull request, manual, and from `bump-pins.yml` | `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, a release build (all `--locked`), and `cargo deny check all` (RustSec advisories, licenses, bans, sources) |
 | `image.yml` | Push to `main`, tags `v*`, manual | Calls `ci.yml` first. Builds with the registry cache and pushes to ghcr.io with provenance and SBOM attestations. |
+| `bump-pins.yml` | Every Monday, manual | For each pinned native component (llama.cpp, audio.cpp, parakeet.cpp, SearXNG) with a newer upstream version, `scripts/bump-pins.sh` changes the pin. The workflow opens a pull request on the branch `bump/<component>`, starts `ci.yml` on it and test-builds the image without a push. A person merges. |
 
-The toolchain version is in `rust-toolchain.toml` and in `docker-bake.hcl` (`RUST_VERSION`). The actions are pinned to commit SHAs. Dependabot proposes updates for crates, actions and base images every week.
+The toolchain version is in `rust-toolchain.toml` and in `docker-bake.hcl` (`RUST_VERSION`). The actions are pinned to commit SHAs. Dependabot proposes updates for crates, actions and base images every week. The Rust toolchain and cargo-chef are bumped by hand.

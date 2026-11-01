@@ -21,7 +21,7 @@ Set the temperature and top-p of each model in the Home Assistant agent, see [ll
 | Item | Value |
 |---|---|
 | Hardware | Intel Core i5-12400T, 6 threads, CPU only (`--device none`), 32 GB RAM |
-| Server | llama-server b11966 from this image, context 32k |
+| Server | llama-server b11966, context 32k |
 | Client | Home Assistant 2026.10.4, llama.cpp integration. Temperature and top-p: 0.7 and 1.0 (the Home Assistant defaults), unless the table names other values. |
 | Prompt and tools | The same voice prompt (about 5,500 characters) and 28 tools for every model: Assist intents, live context, scripts for weather, bins, meal plan and recipes, a web search tool |
 | Round 1 | 13 questions. Topics: weather, bins, light states, sensor values, shopping list, clothing advice, meal plan, recipes, web search, music, one action. |

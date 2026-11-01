@@ -10,6 +10,8 @@ on:
   pull_request:
     paths-ignore: ['docs/**', '**.md']
   workflow_call:
+  # The workflow "Bump pins" starts CI on its branches this way.
+  workflow_dispatch:
 
 permissions:
   contents: read

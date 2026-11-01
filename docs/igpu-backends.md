@@ -12,7 +12,7 @@ Result: Vulkan stays the backend of the image. Turn off flash attention for ever
 | iGPU | Arrow Lake-S iGPU of a Core Ultra 7 270K (64 EU, Xe-LPG, no matrix cores), kernel driver i915 |
 | Memory | DDR5-6000, two channels |
 | CPU reference | 6 threads on 6 P-cores (`taskset -c 0-5`, `-t 6`) |
-| llama.cpp | b11966, the same build as the image |
+| llama.cpp | b11966 |
 | Vulkan | Prebuilt release `ubuntu-vulkan-x64`, Mesa ANV 26.2 of the host |
 | SYCL | Own build from source (see [SYCL](#sycl)), oneAPI 2026.2, Intel compute runtime 26.31 |
 | OpenVINO | Prebuilt release `ubuntu-openvino-2026.4.1-x64`, Intel compute runtime 26.31 |
