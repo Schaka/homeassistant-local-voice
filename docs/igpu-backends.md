@@ -111,8 +111,6 @@ To use the GPU, set:
 -e LLM_DEVICE=Vulkan0 -e LLM_EXTRA_ARGS="-fa off"
 ```
 
-The earlier statement "Ling is slower on an Intel iGPU than on the CPU" came from tests with flash attention on.
-
 ## SYCL
 
 SYCL runs on Level Zero, the low-level GPU interface of Intel. It needs these parts in the image:

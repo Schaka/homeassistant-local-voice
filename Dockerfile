@@ -31,8 +31,8 @@ RUN git init -q . \
     && git remote add origin https://github.com/0xShug0/audio.cpp \
     && git fetch -q --depth 1 origin "${AUDIOCPP_COMMIT}" \
     && git checkout -q FETCH_HEAD
-# --native-cpu OFF: -march=native bakes in the ISA of the build machine. A CI
-# runner with AVX-512 produced a binary that died with SIGILL on an i5-12400T.
+# --native-cpu OFF: -march=native bakes in the ISA of the build machine. A
+# binary built on a CPU with AVX-512 dies with SIGILL on a CPU without it.
 RUN ./scripts/build_linux.sh --backend vulkan --native-cpu OFF \
         --model-set custom --models pocket_tts --target audiocpp_server
 

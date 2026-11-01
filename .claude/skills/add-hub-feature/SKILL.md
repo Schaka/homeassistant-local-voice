@@ -37,7 +37,7 @@ Answer these before you write code:
 1. Open them at runtime with `libloading` and `RTLD_LOCAL` (the default). `libparakeet.so` carries its own ggml with the same symbol names as llama.cpp's ggml. Global loading would mix them.
 2. Generate bindings with bindgen in `build.rs` from the headers of the pinned build. The headers come from the same upstream tag as the library (see the llamacpp stage in the Dockerfile and `scripts/fetch-llama-headers.sh`). Never commit generated bindings or upstream headers.
 3. Every `unsafe` block gets a `// SAFETY:` comment. Raw pointers live behind a `Mutex`, and `unsafe impl Send/Sync` explains why it is sound.
-4. Compare the results with the upstream tool once (for the embedder: the vectors of llama-server were identical).
+4. Compare the results with the upstream tool once (for the embedder: the vectors must equal those of llama-server).
 
 ## 5. Data on disk
 
@@ -50,7 +50,7 @@ Answer these before you write code:
 
 1. A `reqwest::Client` per service with timeouts.
 2. Prefer change events (WebSocket) plus a periodic full comparison over polling only.
-3. Tolerate odd data: optional fields get `#[serde(default)]`. A real Jellyfin server sent an episode without a name, which broke a whole list.
+3. Tolerate odd data: optional fields get `#[serde(default)]`. Jellyfin sends episodes without a name, and one such item must not break a whole list.
 
 ## 7. Tests
 
@@ -66,6 +66,7 @@ Answer these before you write code:
 2. `docs/configuration.md` (every variable), `docs/architecture.md` (processes, routes, source files), the feature table in `README.md`, `docs/hardware.md` if it needs RAM or CPU.
 3. A tested example in `examples/home-assistant/` if Home Assistant uses it.
 4. Plain English, as in `AGENTS.md`.
+5. State the current state only, in documentation, comments and messages (rule 9 of `AGENTS.md`). When the feature replaces behavior, rewrite the old sentences. Do not describe the change.
 
 ## 9. Before the push
 

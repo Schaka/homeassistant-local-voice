@@ -10,7 +10,7 @@ use bytes::Bytes;
 use serde_json::{Map, Value, json};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-/// Wyoming library version the events claim, the same as the old Python server.
+/// Wyoming library version that the events claim.
 pub const VERSION: &str = "1.10.2";
 const MAX_HEADER: usize = 64 * 1024;
 const MAX_DATA: usize = 1024 * 1024;

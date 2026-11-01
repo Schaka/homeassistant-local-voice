@@ -14,6 +14,8 @@ The server has one port for everything. [architecture.md](architecture.md) lists
 
 Home Assistant connects to `http://<host>:10300/llm/v1` and `http://<host>:10300/mcp`.
 
+Log lines of `assistant-hub` carry the local time with its UTC offset. The time zone comes from the variable `TZ` (for example `Europe/Berlin`). Unraid sets `TZ` for every container. The lines of llama-server show the time since its start, because llama-server has no wall-clock option.
+
 ## Volumes
 
 | Container path | Content |

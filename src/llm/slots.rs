@@ -9,8 +9,8 @@
 //! it again every 5 min when it changed. It never restores while a request
 //! runs. A slow or failed health check is no restart: under full CPU load,
 //! `/health` can answer late, and a restore then would overwrite the current
-//! cache with the saved one (seen on 2026-11-01: every request prefilled 7k
-//! tokens again). `save_now` runs once at shutdown, before
+//! cache with the saved one. Every request would then prefill the full prompt
+//! (7k tokens) again. `save_now` runs once at shutdown, before
 //! llama-server stops. A save goes to `FILE.tmp` first and then replaces
 //! `FILE`, so a kill in the middle never leaves a broken file.
 

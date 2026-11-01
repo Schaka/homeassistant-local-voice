@@ -26,7 +26,7 @@ A result has about 150 to 300 tokens. Generic search MCP servers offer several t
 
 Some queries ask for something recent, with words such as "last", "latest", "current" or "this year". If such a query names no year, the server adds the current year to it. Small models rarely do that themselves. Without the year, the search engines put general pages first.
 
-The date line is there because small models trust their training data. In a test, Ling-3.0-tiny found "Spain 2026" in the results and still answered "Argentina 2022" until the tool result had that line.
+The date line is there because small models trust their training data. In a test, Ling-3.0-tiny found "Spain 2026" in the results and still answered "Argentina 2022" when the tool result had no date line.
 
 ### REST
 

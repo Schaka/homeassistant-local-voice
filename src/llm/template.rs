@@ -9,9 +9,8 @@
 //!
 //! The fix is one line per template: after a tool result, the answer starts
 //! with a closed thinking block. The model still thinks after a user message,
-//! where it decides which tool to call. In a test with 10 Home Assistant
-//! style questions (docs/llm.md), this halved the time per question for LFM3
-//! with the same results.
+//! where it decides which tool to call. docs/llm.md has the measured effect
+//! on the time per question.
 //!
 //! The server reads the template from the GGUF file at each start and applies
 //! the patch there, so a new upstream template is used as soon as it ships. If

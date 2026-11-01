@@ -645,8 +645,8 @@ mod tests {
 
     #[test]
     fn episodes_without_a_name_parse() {
-        // Seen on a real server: one episode of "One Piece" had no Name, and
-        // the whole episode list failed to parse.
+        // Jellyfin sends episodes without a Name. One such episode must not
+        // fail the whole episode list.
         let list: Items =
             serde_json::from_str(r#"{"Items": [{"Id": "e1", "Type": "Episode", "IndexNumber": 3}]}"#).unwrap();
         assert_eq!(list.items[0].name, "");

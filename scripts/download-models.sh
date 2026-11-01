@@ -48,7 +48,7 @@ STT_SIZE=875449920
 # TTS: PocketTTS-100M English, q8_0 + the 'alba' voice embedding.
 TTS_URL="$HF/audio-cpp/audio.cpp-gguf/resolve/main/PocketTTS-GGUF/english/pocket-tts-english-q8_0.gguf"
 TTS_OUT="models/pocket-tts/pocket-tts-english-q8_0.gguf"
-TTS_SIZE=127867968  # upstream re-published 2026-10-27
+TTS_SIZE=127867968
 VOICE_URL="$HF/audio-cpp/audio.cpp-gguf/resolve/main/PocketTTS-GGUF/english/embeddings/alba.safetensors"
 VOICE_OUT="models/pocket-tts/embeddings/alba.safetensors"
 VOICE_SIZE=6194424

@@ -41,7 +41,8 @@ CI runs the first three, a release build and `cargo deny check all`. All must pa
 6. `build.rs` generates the llama.cpp bindings at build time from the headers of `LLAMACPP_BUILD` (docker-bake.hcl), the same build as the library in the image. Nothing from llama.cpp is in the repository. Outside the image, run `scripts/fetch-llama-headers.sh` once. After a bump of `LLAMACPP_BUILD`, a changed struct fails the build through the layout checks of bindgen.
 7. A new environment variable needs a default, a line in `src/config.rs` and a row in `docs/configuration.md`.
 8. Write documentation in plain English: short sentences, active voice, no semicolons, no em-dashes.
-9. The target hardware includes 10-year-old office PCs ([docs/hardware.md](docs/hardware.md)). Do not add work to the request path that a 4th-generation Core i5 cannot do fast.
+9. Documentation, code comments, error messages and skills describe the current state only. They never tell a history. Do not write that something was fixed, changed, added, replaced or removed. Do not compare with an earlier version, with "the old server" or with "before the fix". Words like "no longer", "used to", "now", "still", "again", "later" and "faster than it was" are warnings. Do not name the date of an incident ("seen on ..."). Describe what the code does, what the numbers are and why the design is this way. Git holds the history. A measurement names its conditions (hardware, settings, date) and compares only states that exist today. When you change behavior, rewrite every sentence that the change makes wrong. Do not add a sentence about the change.
+10. The target hardware includes 10-year-old office PCs ([docs/hardware.md](docs/hardware.md)). Do not add work to the request path that a 4th-generation Core i5 cannot do fast.
 
 ### Skills
 
@@ -52,9 +53,9 @@ CI runs the first three, a release build and `cargo deny check all`. All must pa
 | `add-hub-feature` | Add a route, an MCP tool, a search, a background service or a native engine |
 | `bump-native-engine` | Update llama.cpp, parakeet.cpp, audio.cpp, SearXNG, Rust or cargo-chef |
 
-### Lessons that cost time before
+### Facts to know
 
-1. Measure on real data before you trust a design. The media index first ranked episodes and series together, and a "Planet Earth" episode beat "Dune" for "desert planet with sand worms". Only the evaluation on a real library showed it.
+1. Measure on real data before you trust a design. The media index ranks series and movies apart from episodes, because an episode of "Planet Earth" otherwise beats "Dune" for "desert planet with sand worms". Only the evaluation on a real library shows such a case.
 2. A threshold needs negatives in its test set: queries that must find nothing. Without them, every gate looks good.
 3. Native libraries with their own ggml must load with `RTLD_LOCAL`, and only one backend each. `assistant-hub` asks `llama-server --list-devices` for GPUs, because Mesa's software driver is no device for ggml.
 4. Background work that uses the CPU runs on its own thread at nice 10, never on the tokio blocking pool.

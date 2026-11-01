@@ -190,7 +190,7 @@ pub async fn serve<S: AsyncRead + AsyncWrite + Unpin>(stream: S, voice: Arc<Voic
                 };
                 // Always answer with a transcript, also an empty one. Home
                 // Assistant waits for it; without it the satellite stays in
-                // "listening" (seen for 11 minutes on 2026-10-31).
+                // "listening".
                 write_event(&mut writer, &Event::new("transcript", json!({"text": text}))).await?;
             }
             "synthesize" => {

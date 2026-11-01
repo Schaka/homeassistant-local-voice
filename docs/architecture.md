@@ -38,7 +38,7 @@ A client that sends nothing for 30 s is dropped.
 
 ## Wyoming
 
-The `info` answer is the same as the one of the old Python server. So Home Assistant sees the same services (`parakeet` and `audiocpp`). STT collects the audio of a request as it arrives and converts it once at `audio-stop` to 16 kHz mono. TTS answers with `audio-start`, chunks of 4096 samples and `audio-stop`.
+The `info` answer lists the services `parakeet` and `audiocpp`. STT collects the audio of a request as it arrives and converts it once at `audio-stop` to 16 kHz mono. TTS answers with `audio-start`, chunks of 4096 samples and `audio-stop`.
 
 STT and TTS share one GPU lock, so they never run on the GPU at the same time. Three GPU faults in a row ("device lost", HTTP 500 from audiocpp_server) make the server exit with an error. The restart policy of the container then starts it with a clean GPU state.
 

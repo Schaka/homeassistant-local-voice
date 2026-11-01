@@ -109,8 +109,8 @@ Add about 1.7 GB for STT and TTS (about 2.4 GB with the STT model `tdt-1.1b-q8_0
 Measured through Home Assistant on a CPU (i5-12400T), see [model-comparison.md](model-comparison.md):
 
 1. Ling-3.0-tiny Q4_K_M: the default. All answers correct, 5 to 7 s.
-2. MiniCPM5-2B Q4_K_M: good answers, 15 to 17 s, smaller file. Also faster now, see below.
-3. LFM3-1.7B Q4_K_M: all answers correct, but 23 to 26 s in this test, which ran before the tool-result fix and the smaller thinking budget. With both, it answered in about half the time (see below). Keep its thinking on (`LLM_REASONING=on`, the default).
+2. MiniCPM5-2B Q4_K_M: good answers, smaller file. 15 to 17 s with the original template and a budget of 512 tokens, 6 s per question with the defaults on a Core Ultra 7 270K (see "Speed settings per family").
+3. LFM3-1.7B Q4_K_M: all answers correct. 23 to 26 s with the original template and a budget of 512 tokens, 8 s per question with the defaults on a Core Ultra 7 270K (see "Speed settings per family"). Keep its thinking on (`LLM_REASONING=on`, the default).
 4. Granite 4.0 H Tiny Q4_K_M: the fastest (3 s), but less reliable.
 5. Qwen3.5-4B Q4_K_M: correct, but 20 s.
 
@@ -135,7 +135,7 @@ After the first request, llama-server keeps the processed prompt in its cache. H
 A restart empties this cache. With `LLM_SLOT_CACHE=on` (the default), `assistant-hub` saves the KV cache of the last Assist conversation to `/models/llm/slots`:
 
 1. If the cache changed, it saves it every 5 minutes. It also saves it at each container stop.
-2. When llama-server starts, it restores the file once. A slow health check under full CPU load is no restart, and a restore never runs during a request. Before this rule, the cache was restored after almost every request, so each request prefilled the full prompt again.
+2. When llama-server starts, it restores the file once. A slow health check under full CPU load is no restart, and a restore never runs during a request. A restore during a request would replace the current cache with the saved one, and the request would prefill the full prompt again.
 3. For 6,200 tokens of Ling-3.0-tiny, the file is 124 MB. A save or a restore takes 0.3 s or less (13 ms and 25 ms for 3,450 tokens in a test).
 
 The first request after a restart then takes about 0.5 s instead of more than 60 s. `/models/llm` must be writable. The cache is empty again after each change of the prompt, of the exposed entities or of the tools.
@@ -176,7 +176,7 @@ The token speed was not the problem: LFM3 generated 42 tokens per second, MiniCP
 ## Limits
 
 1. Without `LLM_API_KEY`, every client on your network can use `/llm/...`. If port 10300 is reachable from outside your LAN, set `LLM_API_KEY`.
-2. With thinking on, a small model can think for a long time. `LLM_REASONING_BUDGET` limits it to 512 tokens by default.
+2. With thinking on, a small model can think for a long time. `LLM_REASONING_BUDGET` limits it. The default is 128 to 512 tokens, depending on the family.
 3. MTP speculative decoding is off. For Ling-3.0-tiny, it hangs on RADV (llama.cpp PR #26608).
 4. If the container has a memory limit, do not start a second llama-server in it. Two Ling instances need about 10 GB.
 

@@ -2,7 +2,7 @@
 
 This page shows which small models work as the conversation agent of Home Assistant on a CPU, and which do not. Read it before you try another model: most of the tested models were too slow or not reliable enough.
 
-All results are from 2026-10-31. The speed of LFM3 and MiniCPM5 improved later with the tool-result fix and smaller thinking budgets ([llm.md](llm.md#speed-settings-per-family)).
+All results are from 2026-10-31. They use the original chat templates of LFM3 and MiniCPM5 and a thinking budget of 512 tokens. With the tool-result fix and the default budgets, these two models need about half the time ([llm.md](llm.md#speed-settings-per-family)).
 
 ## Recommendations
 
@@ -80,11 +80,11 @@ A fast model is not enough. Granite 4.0 H Tiny was the fastest, but it gave answ
 | Granite 4.2 8B and 30B | Dense. The 3B was already far too slow. |
 | Fine-tunes of Qwen 2.5 or Qwen 3 (for example Home-LLM models) | Older base models. The newer Qwen3.5-4B was already 4 times slower than Ling. |
 
-## Problems found on the way
+## Known problems
 
-| Problem | Fix |
+| Problem | Handling |
 |---|---|
-| With thinking on, Ling sometimes wrote its answer after a tool result into an open `<think>` block. llama.cpp then returned no answer, and Home Assistant gave up with "Unable to get response". LFM3 and MiniCPM5 thought again from scratch before each answer, because Home Assistant does not send their thinking back. | The server patches the templates of Ling, LFM3 and MiniCPM5 at start, see [llm.md](llm.md#the-tool-result-fix-of-the-chat-templates). For LFM3 and MiniCPM5, this and a smaller thinking budget halved the time per question (2026-11-01). |
-| In long conversations, Ling stopped thinking, because the template marks every earlier answer with an empty thinking block. | Not changed. With thinking in long conversations, the answers took much longer. |
+| With the original templates and thinking on, Ling sometimes writes its answer after a tool result into an open `<think>` block. llama.cpp then returns no answer, and Home Assistant gives up with "Unable to get response". LFM3 and MiniCPM5 think again from scratch before each answer, because Home Assistant does not send their thinking back. | The server patches the templates of Ling, LFM3 and MiniCPM5 at start, see [llm.md](llm.md#the-tool-result-fix-of-the-chat-templates). [llm.md](llm.md#speed-settings-per-family) has the effect on the time per question. |
+| In long conversations, Ling stops thinking, because the template marks every earlier answer with an empty thinking block. | The image does not change this template. Thinking in long conversations makes the answers much slower. |
 | Small models put the year of their training data into web search queries ("World Cup 2022"). | The search tool replaces an older year with the current year in questions about recent events. |
 | Models chose the speaker of a voice satellite or a TV box as the music player. | Expose only the music players of the rooms to Assist. |

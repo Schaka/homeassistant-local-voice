@@ -104,9 +104,8 @@ impl Family {
 
     /// Thinking tokens per reply when `LLM_REASONING_BUDGET` is not set.
     /// Measured with 10 Home Assistant style questions (docs/llm.md): LFM3
-    /// and MiniCPM5 kept their results with these budgets and the patched
-    /// template, and answered in about half the time. Ling thinks briefly
-    /// anyway. MiniCPM5 at 128 lost quality.
+    /// and MiniCPM5 keep their results with these budgets and the patched
+    /// template. Ling thinks briefly anyway. MiniCPM5 at 128 loses quality.
     pub fn default_reasoning_budget(self) -> &'static str {
         match self {
             Self::Ling3 | Self::Qwen35 | Self::Granite4 => "512",
