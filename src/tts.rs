@@ -105,6 +105,7 @@ pub fn child_spec(cfg: &TtsConfig) -> Result<ChildSpec> {
         args: vec!["--config".into(), path.display().to_string()],
         env: vec![],
         env_remove: vec![],
+        starts: Default::default(),
     })
 }
 

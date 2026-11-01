@@ -5,19 +5,24 @@
 //! 4.8k tokens on a CPU. llama-server can write a slot to a file and read it
 //! back (`--slot-save-path`) in well under a second.
 //!
-//! The task restores the file each time llama-server comes up and saves it
-//! again every 5 min when it changed. `save_now` runs once at shutdown, before
+//! The task restores the file once after each start of llama-server and saves
+//! it again every 5 min when it changed. It never restores while a request
+//! runs. A slow or failed health check is no restart: under full CPU load,
+//! `/health` can answer late, and a restore then would overwrite the current
+//! cache with the saved one (seen on 2026-11-01: every request prefilled 7k
+//! tokens again). `save_now` runs once at shutdown, before
 //! llama-server stops. A save goes to `FILE.tmp` first and then replaces
 //! `FILE`, so a kill in the middle never leaves a broken file.
 
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
-const POLL: Duration = Duration::from_secs(5);
 const SAVE_EVERY: Duration = Duration::from_secs(300);
 /// Smaller slots are side requests (titles), not Assist conversations.
 const MIN_TOKENS: i64 = 1024;
@@ -28,15 +33,20 @@ pub struct SlotCache {
     base: String,
     dir: PathBuf,
     file: String,
+    /// Start counter of the llama-server child process.
+    starts: Arc<AtomicU64>,
+    poll: Duration,
 }
 
 impl SlotCache {
-    pub fn new(port: u16, dir: PathBuf, file: String) -> Result<Self> {
+    pub fn new(port: u16, dir: PathBuf, file: String, starts: Arc<AtomicU64>, poll: Duration) -> Result<Self> {
         Ok(Self {
             client: reqwest::Client::builder().build()?,
             base: format!("http://127.0.0.1:{port}"),
             dir,
             file,
+            starts,
+            poll,
         })
     }
 
@@ -56,7 +66,7 @@ impl SlotCache {
     }
 
     async fn healthy(&self) -> bool {
-        self.call("/health", None, Duration::from_secs(3))
+        self.call("/health", None, Duration::from_secs(10))
             .await
             .is_ok_and(|v| v["status"] == "ok")
     }
@@ -79,6 +89,16 @@ impl SlotCache {
             }
         }
         Ok(best)
+    }
+
+    /// True while any slot processes a request.
+    async fn busy(&self) -> Result<bool> {
+        let slots = self.call("/slots", None, Duration::from_secs(10)).await?;
+        Ok(slots
+            .as_array()
+            .context("/slots is not a list")?
+            .iter()
+            .any(|s| s["is_processing"].as_bool().unwrap_or(false)))
     }
 
     async fn save(&self, slot: &Value) -> Result<Option<i64>> {
@@ -147,35 +167,124 @@ impl SlotCache {
     }
 
     pub async fn run(self, cancel: CancellationToken) {
-        let mut up = false;
+        // Start number whose cache was restored. 0 = none yet.
+        let mut restored_start = 0u64;
         let mut last_task: Option<i64> = None;
         let mut next_save = Instant::now() + SAVE_EVERY;
         loop {
             tokio::select! {
                 () = cancel.cancelled() => return,
-                () = tokio::time::sleep(POLL) => {}
+                () = tokio::time::sleep(self.poll) => {}
             }
-            if !self.healthy().await {
-                up = false;
+            let start = self.starts.load(Ordering::SeqCst);
+            if start != restored_start {
+                // llama-server started (again). Wait until it answers.
+                if !self.healthy().await {
+                    continue;
+                }
+                match self.busy().await {
+                    Ok(false) => self.restore().await,
+                    Ok(true) => tracing::info!("prompt cache: a request already runs, no restore"),
+                    Err(_) => continue,
+                }
+                restored_start = start;
+                last_task = None;
+                next_save = Instant::now() + SAVE_EVERY;
                 continue;
             }
-            if !up {
-                // First start, or llama-server came back after a crash.
-                up = true;
-                last_task = None;
-                self.restore().await;
-                next_save = Instant::now() + SAVE_EVERY;
-            } else if Instant::now() >= next_save {
-                next_save = Instant::now() + SAVE_EVERY;
-                match self.pick_slot().await {
-                    Ok(Some(slot)) if slot["id_task"].as_i64() != last_task => match self.save(&slot).await {
-                        Ok(task) => last_task = task,
-                        Err(err) => tracing::warn!("prompt cache: save failed: {err}"),
-                    },
-                    Ok(_) => {}
+            if start == 0 || Instant::now() < next_save {
+                continue;
+            }
+            next_save = Instant::now() + SAVE_EVERY;
+            match self.pick_slot().await {
+                Ok(Some(slot)) if slot["id_task"].as_i64() != last_task => match self.save(&slot).await {
+                    Ok(task) => last_task = task,
                     Err(err) => tracing::warn!("prompt cache: save failed: {err}"),
-                }
+                },
+                Ok(_) => {}
+                Err(err) => tracing::warn!("prompt cache: save failed: {err}"),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::Router;
+    use axum::extract::{Query, State};
+    use axum::http::StatusCode;
+    use axum::routing::{get, post};
+    use std::collections::HashMap;
+    use std::sync::atomic::AtomicUsize;
+
+    #[derive(Clone, Default)]
+    struct Fake {
+        health_calls: Arc<AtomicUsize>,
+        restores: Arc<AtomicUsize>,
+    }
+
+    async fn fake_llama(fake: Fake) -> u16 {
+        let app = Router::new()
+            .route(
+                "/health",
+                get(|State(f): State<Fake>| async move {
+                    // Every second health check fails, like a busy server.
+                    if f.health_calls.fetch_add(1, Ordering::SeqCst) % 2 == 1 {
+                        (StatusCode::SERVICE_UNAVAILABLE, axum::Json(json!({"status": "busy"})))
+                    } else {
+                        (StatusCode::OK, axum::Json(json!({"status": "ok"})))
+                    }
+                }),
+            )
+            .route(
+                "/slots",
+                get(|| async {
+                    axum::Json(json!([{"id": 0, "is_processing": false, "n_prompt_tokens": 0, "id_task": -1}]))
+                }),
+            )
+            .route(
+                "/slots/{id}",
+                post(
+                    |State(f): State<Fake>, Query(q): Query<HashMap<String, String>>| async move {
+                        if q.get("action").map(String::as_str) == Some("restore") {
+                            f.restores.fetch_add(1, Ordering::SeqCst);
+                        }
+                        axum::Json(json!({"n_restored": 1, "timings": {"restore_ms": 1.0}}))
+                    },
+                ),
+            )
+            .with_state(fake);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        port
+    }
+
+    #[tokio::test]
+    async fn failed_health_checks_do_not_restore_again() {
+        let fake = Fake::default();
+        let port = fake_llama(fake.clone()).await;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("m.slot"), b"x").unwrap();
+        let starts = Arc::new(AtomicU64::new(1));
+        let cache = SlotCache::new(
+            port,
+            dir.path().into(),
+            "m.slot".into(),
+            starts.clone(),
+            Duration::from_millis(20),
+        )
+        .unwrap();
+        let cancel = CancellationToken::new();
+        tokio::spawn(cache.run(cancel.clone()));
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        assert!(fake.health_calls.load(Ordering::SeqCst) >= 1);
+        assert_eq!(fake.restores.load(Ordering::SeqCst), 1, "one restore per start");
+        // A real restart of llama-server restores once more.
+        starts.fetch_add(1, Ordering::SeqCst);
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        assert_eq!(fake.restores.load(Ordering::SeqCst), 2);
+        cancel.cancel();
     }
 }

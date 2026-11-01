@@ -216,6 +216,7 @@ pub async fn child_spec(cfg: &LlmConfig) -> (ChildSpec, bool) {
         env,
         // The hub checks the API key itself. llama-server listens on 127.0.0.1 only.
         env_remove: vec![s("LLAMA_API_KEY")],
+        starts: Default::default(),
     };
     (spec, slot_cache)
 }

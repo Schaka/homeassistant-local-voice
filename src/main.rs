@@ -165,10 +165,16 @@ async fn run(cfg: Config) -> Result<bool> {
     let llm_proxy = match &cfg.llm {
         Some(llm_cfg) => {
             let (spec, slots_usable) = llm::child_spec(llm_cfg).await;
+            let llama_starts = spec.starts.clone();
             supervised.push(supervisor::spawn(spec, children.clone()));
             if slots_usable {
-                let cache =
-                    llm::slots::SlotCache::new(llm_cfg.internal_port, llm_cfg.slot_dir.clone(), llm_cfg.slot_file())?;
+                let cache = llm::slots::SlotCache::new(
+                    llm_cfg.internal_port,
+                    llm_cfg.slot_dir.clone(),
+                    llm_cfg.slot_file(),
+                    llama_starts,
+                    Duration::from_secs(5),
+                )?;
                 tokio::spawn(cache.clone().run(shutdown.clone()));
                 slot_cache = Some(cache);
             }

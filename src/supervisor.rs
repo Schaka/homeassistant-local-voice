@@ -4,6 +4,8 @@
 
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use nix::sys::signal::{Signal, kill};
@@ -19,6 +21,8 @@ pub struct ChildSpec {
     pub args: Vec<String>,
     pub env: Vec<(String, String)>,
     pub env_remove: Vec<String>,
+    /// Counts the successful starts. Others watch it to notice a restart.
+    pub starts: Arc<AtomicU64>,
 }
 
 const RESTART_DELAY: Duration = Duration::from_secs(2);
@@ -53,6 +57,7 @@ pub fn spawn(spec: ChildSpec, cancel: CancellationToken) -> JoinHandle<()> {
             }
             match cmd.spawn() {
                 Ok(mut child) => {
+                    spec.starts.fetch_add(1, Ordering::SeqCst);
                     tokio::select! {
                         status = child.wait() => match status {
                             Ok(s) => tracing::warn!("[{name}] exited ({s}), restarting in {RESTART_DELAY:?}"),
