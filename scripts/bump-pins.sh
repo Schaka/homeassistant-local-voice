@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Looks up the newest upstream version of each pinned native component and
 # rewrites the pin in docker-bake.hcl, the Dockerfile and docs/configuration.md.
-# The workflow "Bump pins" runs it weekly. It needs the GitHub CLI (`gh`).
+# The workflow "Bump pins" runs it weekly and puts all changes in one pull
+# request. It needs the GitHub CLI (`gh`).
 #
 #   scripts/bump-pins.sh --check            # list outdated pins, change nothing
 #   scripts/bump-pins.sh                    # update all pins in the working tree

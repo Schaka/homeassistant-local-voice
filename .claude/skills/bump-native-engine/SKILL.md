@@ -7,7 +7,7 @@ description: Update a pinned upstream component of the image (llama.cpp, parakee
 
 All versions are in `docker-bake.hcl`. The Dockerfile repeats them as `ARG` defaults, and `docs/configuration.md` lists them. Change all three places.
 
-The workflow "Bump pins" does this for llama.cpp, audio.cpp, parakeet.cpp and SearXNG every Monday (`scripts/bump-pins.sh`). It opens one pull request per component on the branch `bump/<component>`, starts CI on it and test-builds the image. `scripts/bump-pins.sh --check` lists the outdated pins locally. For such a pull request, do the steps of the component below, then merge. Close the pull request to skip it. The next run opens it again while the pin is outdated. The Rust toolchain and cargo-chef are bumped by hand.
+The workflow "Bump pins" does this for llama.cpp, audio.cpp, parakeet.cpp and SearXNG every Monday (`scripts/bump-pins.sh`). It opens one pull request on the branch `bump/pins` that changes all outdated pins together, because the image contains them together. It starts CI on the branch and test-builds the image. `scripts/bump-pins.sh --check` lists the outdated pins locally. For such a pull request, do the steps of each changed component below, then merge. If one component breaks the build, fix the cause on `main` first (for example in `src/llm/template.rs`) and run the workflow again, because each run builds the branch anew from `main`. The Rust toolchain and cargo-chef are bumped by hand.
 
 ## llama.cpp (`LLAMACPP_BUILD`)
 

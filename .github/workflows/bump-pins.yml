@@ -1,10 +1,12 @@
 name: Bump pins
 
-# Every Monday, and on demand: for each pinned native component with a newer
-# upstream version (scripts/bump-pins.sh), this workflow opens a pull request
-# with the new pin, starts CI on its branch and test-builds the image without a
-# push. A person reads the release notes (skill bump-native-engine) and merges.
-# The merge builds and publishes the image as for any other change.
+# Every Monday, and on demand: if any pinned native component has a newer
+# upstream version (scripts/bump-pins.sh), this workflow opens one pull request
+# that bumps all of them together. The components share one image, so the
+# combination is what gets tested. The workflow starts CI on the branch and
+# test-builds the image without a push. A person reads the release notes
+# (skill bump-native-engine) and merges. The merge builds and publishes the
+# image as for any other change.
 #
 # The repository setting "Allow GitHub Actions to create and approve pull
 # requests" (Settings > Actions > General) must be on.
@@ -25,55 +27,53 @@ concurrency:
   group: bump-pins
   cancel-in-progress: false
 
+env:
+  BRANCH: bump/pins
+
 jobs:
   bump:
     runs-on: ubuntu-latest
     timeout-minutes: 240
-    strategy:
-      fail-fast: false
-      matrix:
-        component: [llamacpp, audiocpp, parakeet, searxng]
     env:
       GH_TOKEN: ${{ github.token }}
-      COMPONENT: ${{ matrix.component }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Update the pin
+      - name: Update the pins
         id: bump
         run: |
           set -euo pipefail
-          summary="$(./scripts/bump-pins.sh "$COMPONENT")"
-          echo "$summary"
+          ./scripts/bump-pins.sh | tee summary.txt
           if git diff --quiet; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
-            { echo "summary<<EOF"; echo "$summary"; echo "EOF"; } >> "$GITHUB_OUTPUT"
           fi
 
       - name: Push the branch and open the pull request
         if: steps.bump.outputs.changed == 'true'
         env:
-          SUMMARY: ${{ steps.bump.outputs.summary }}
+          BASE: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
-          branch="bump/$COMPONENT"
+          changes="$(grep -- ' -> ' summary.txt)"
+          names="$(echo "$changes" | cut -d: -f1 | paste -sd, - | sed 's/,/, /g')"
+          title="Bump pins: $names"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git switch -c "$branch"
-          git commit -q -am "Bump $SUMMARY"
-          git push --force origin "$branch"
-          body="$(printf 'Automatic bump from `scripts/bump-pins.sh`.\n\n`%s`\n\nBefore you merge, follow the skill `bump-native-engine` for this component: read the release notes, and check the test build and CI results below.\n' "$SUMMARY")"
-          number="$(gh pr list --head "$branch" --state open --json number --jq '.[0].number // empty')"
+          git switch -c "$BRANCH"
+          git commit -q -am "$title" -m "$changes"
+          # The branch is built again from the default branch at each run.
+          git push --force origin "$BRANCH"
+          body="$(printf 'Automatic bump from `scripts/bump-pins.sh`. All outdated pins change together, because the image contains them together.\n\n```\n%s\n```\n\nBefore you merge, follow the skill `bump-native-engine` for each component above: read the release notes, and check the test build and CI results below.\n' "$changes")"
+          number="$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')"
           if [ -n "$number" ]; then
-            gh pr edit "$number" --title "Bump $SUMMARY" --body "$body"
+            gh pr edit "$number" --title "$title" --body "$body"
           else
-            gh pr create --head "$branch" --base "${{ github.event.repository.default_branch }}" \
-              --title "Bump $SUMMARY" --body "$body"
+            gh pr create --head "$BRANCH" --base "$BASE" --title "$title" --body "$body"
           fi
           # Pushes by this workflow do not start other workflows. A dispatch does.
-          gh workflow run ci.yml --ref "$branch"
+          gh workflow run ci.yml --ref "$BRANCH"
 
       - name: Free disk space
         if: steps.bump.outputs.changed == 'true'
@@ -116,7 +116,7 @@ jobs:
           RESULT: ${{ job.status }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          number="$(gh pr list --head "bump/$COMPONENT" --state open --json number --jq '.[0].number // empty')"
+          number="$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')"
           if [ -n "$number" ]; then
             gh pr comment "$number" --body "Test build of the image: **$RESULT** ($RUN_URL). CI runs as the workflow CI on this branch."
           fi
