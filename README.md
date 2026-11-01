@@ -75,7 +75,7 @@ Without a GPU, leave out the `--device` and `--group-add` lines. Speech then run
 | [docs/search.md](docs/search.md) | Web search (MCP tool and `/web/search`) and YouTube search |
 | [docs/configuration.md](docs/configuration.md) | All environment variables, build arguments and ports |
 | [docs/home-llm-prompt.md](docs/home-llm-prompt.md) | A tested system prompt for the Local LLM (HomeLLM) add-on |
-| [docs/hardware-notes.md](docs/hardware-notes.md) | Notes for old AMD GPUs (GCN 1.0, 2 GB), from the old image |
+| [docs/hardware-notes.md](docs/hardware-notes.md) | Old AMD GPUs (GCN 1.0, 2 GB): measured speed and why the server protects the GPU |
 
 ## Attributions
 

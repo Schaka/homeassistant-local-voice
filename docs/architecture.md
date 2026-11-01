@@ -54,10 +54,11 @@ STT and TTS share one GPU lock, so they never run on the GPU at the same time. T
 | `src/llm/` | llama-server arguments per model family, the proxy, the prompt cache |
 | `src/search.rs`, `src/youtube.rs`, `src/jellyfin.rs`, `src/mcp.rs` | SearXNG through PyO3, YouTube search, Jellyfin search, MCP |
 | `src/text.rs` | Matching of spoken names against titles, trigram similarity |
-| `src/media/` | Media index: EmbeddingGemma 2 through `libllama.so` (`embed.rs`, bindings in `llama_sys.rs` and `ggml_sys.rs`), item texts and Jellyfin's change messages (`docs.rs`), vectors on disk (`index.rs`), sync and gate (`mod.rs`), real-library evaluation (`eval.rs`) |
+| `build.rs` | Generates the bindings of llama.cpp's C API with bindgen, from the headers of the llama.cpp build in the image |
+| `src/media/` | Media index: EmbeddingGemma 2 through `libllama.so` (`embed.rs`), item texts and Jellyfin's change messages (`docs.rs`), vectors on disk (`index.rs`), sync and gate (`mod.rs`), real-library evaluation (`eval.rs`) |
 | `src/supervisor.rs` | Child processes |
 | `src/gguf.rs` | Check for truncated model files before the engines load them |
-| `src/probe.rs` | `assistant-hub probe describe|stt|tts` and `assistant-hub healthcheck` |
+| `src/probe.rs` | `assistant-hub probe describe|stt|tts|llm` and `assistant-hub healthcheck` |
 
 ## Commands
 
@@ -67,6 +68,7 @@ STT and TTS share one GPU lock, so they never run on the GPU at the same time. T
 | `assistant-hub probe describe` | Print the Wyoming info of a running server |
 | `assistant-hub probe stt FILE.wav` | Transcribe a WAV file |
 | `assistant-hub probe tts "TEXT" OUT.wav` | Synthesize a WAV file |
+| `assistant-hub probe llm "TEXT" [--devices 100]` | One chat request with a Home Assistant tool to `/llm/v1`: reply, tool calls, prompt and generation speed |
 | `assistant-hub verify-gguf FILE...` | Check model files |
 | `assistant-hub healthcheck` | Checks `/health`. Exit code 0 means healthy. |
 
@@ -80,7 +82,7 @@ The Dockerfile has these stages, all on Debian 13 "trixie":
 2. parakeet.cpp and llama.cpp as prebuilt Vulkan releases.
 3. The default STT and TTS models.
 4. SearXNG at a pinned commit, with its packages in `/opt/searxng/lib` for Python 3.13.
-5. `assistant-hub` with cargo-chef (pinned image tag): the dependencies build in their own cached layer, so a code change rebuilds only the crate.
+5. `assistant-hub` with cargo-chef (pinned image tag). Its `build.rs` reads the llama.cpp headers of stage 2: the dependencies build in their own cached layer, so a code change rebuilds only the crate.
 6. Runtime: `debian:trixie-slim` with Mesa Vulkan drivers (RADV, ANV), `libpython3.13` (for the embedded SearXNG) and `tini`. There is no Python interpreter binary, no pip and no compiler in the image.
 
 `docker-bake.hcl` holds every pinned version. `docker buildx bake final` locally builds the same image as CI.

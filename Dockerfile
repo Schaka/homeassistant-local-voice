@@ -48,6 +48,8 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
 
 # ============================================================================
 # llama.cpp: prebuilt Vulkan release, only llama-server and its libraries.
+# The headers of the same tag go to /llama-include: build.rs generates the
+# Rust bindings of libllama.so (media index) from them.
 # Every binary has RUNPATH $ORIGIN, so its own libggml never collides with the
 # ggml inside libparakeet.so or audiocpp_server.
 # ============================================================================
@@ -60,6 +62,11 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
         \( -name 'llama*' ! -name 'llama-server' -o -name 'ggml-rpc-server' \) -delete \
     && find /llama.cpp -maxdepth 1 -name 'libllama-*-impl.so' ! -name 'libllama-server-impl.so' -delete \
     && test -x /llama.cpp/llama-server \
+    && mkdir /llama-include \
+    && curl -fsSL "https://github.com/ggml-org/llama.cpp/archive/refs/tags/${LLAMACPP_BUILD}.tar.gz" \
+        | tar xz -C /llama-include --strip-components=1 \
+            --wildcards "llama.cpp-${LLAMACPP_BUILD}/include/*.h" "llama.cpp-${LLAMACPP_BUILD}/ggml/include/*.h" \
+    && test -f /llama-include/include/llama.h \
     && rm -rf /var/lib/apt/lists/*
 
 # ============================================================================
@@ -109,18 +116,21 @@ FROM lukemathwalker/cargo-chef:${CARGO_CHEF_VERSION}-rust-${RUST_VERSION}-slim-$
 WORKDIR /src
 
 FROM chef AS planner
-COPY Cargo.toml Cargo.lock ./
+COPY Cargo.toml Cargo.lock build.rs ./
 COPY src src
 RUN cargo chef prepare --recipe-path recipe.json
 
 FROM chef AS rust-builder
-# PyO3 links against libpython3.13 of the runtime base.
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3-dev \
+# PyO3 links against libpython3.13 of the runtime base. bindgen (build.rs)
+# needs libclang and the llama.cpp headers of the image.
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3-dev libclang-dev \
     && rm -rf /var/lib/apt/lists/*
 ENV PYO3_PYTHON=/usr/bin/python3.13
+COPY --from=llamacpp-stage /llama-include /llama-include
+ENV LLAMA_INCLUDE_DIR=/llama-include
 COPY --from=planner /src/recipe.json recipe.json
 RUN cargo chef cook --release --locked --recipe-path recipe.json
-COPY Cargo.toml Cargo.lock ./
+COPY Cargo.toml Cargo.lock build.rs ./
 COPY src src
 RUN cargo build --release --locked && install -m755 target/release/assistant-hub /assistant-hub
 

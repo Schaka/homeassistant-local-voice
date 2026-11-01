@@ -1,8 +1,9 @@
-# Build context: only what the Dockerfile copies (Cargo files, src,
+# Build context: only what the Dockerfile copies (Cargo files, build.rs, src,
 # templates). The toolchain file stays out: the builder image pins the
 # same Rust version, and rustup would otherwise download extra components.
 *
 !Cargo.toml
 !Cargo.lock
+!build.rs
 !src/
 !templates/

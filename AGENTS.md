@@ -19,9 +19,10 @@ You get one of two tasks. Read the matching section.
 
 ### Commands
 
-The crate links Python through PyO3 (for the embedded SearXNG). Install the Python development headers. If the default Python is not 3.13, set `PYO3_PYTHON` to an installed Python 3.
+The crate links Python through PyO3 (for the embedded SearXNG). Install the Python development headers. If the default Python is not 3.13, set `PYO3_PYTHON` to an installed Python 3. `build.rs` needs libclang and the llama.cpp headers.
 
 ```bash
+./scripts/fetch-llama-headers.sh   # once, llama.cpp headers to target/
 cargo fmt --all --check
 cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked
@@ -37,7 +38,7 @@ CI runs the first three, a release build and `cargo deny check all`. All must pa
 3. Never start a second llama-server. One model needs 2 to 9 GB.
 4. Keep tool descriptions and tool results short. Each token costs prefill time on a CPU. A search result has 150 to 300 tokens.
 5. Pin every version: crates in `Cargo.lock`, the toolchain in `rust-toolchain.toml` and `docker-bake.hcl`, actions by commit SHA, native engines by release or commit in `docker-bake.hcl`.
-6. The llama.cpp bindings (`src/media/llama_sys.rs`, `ggml_sys.rs`) are generated. After a bump of `LLAMACPP_BUILD`, run `scripts/gen-llama-bindings.sh` and the tests. Never edit them by hand.
+6. `build.rs` generates the llama.cpp bindings at build time from the headers of `LLAMACPP_BUILD` (docker-bake.hcl), the same build as the library in the image. Nothing from llama.cpp is in the repository. Outside the image, run `scripts/fetch-llama-headers.sh` once. After a bump of `LLAMACPP_BUILD`, a changed struct fails the build through the layout checks of bindgen.
 7. A new environment variable needs a default, a line in `src/config.rs` and a row in `docs/configuration.md`.
 8. Write documentation in plain English: short sentences, active voice, no semicolons, no em-dashes.
 9. The target hardware includes 10-year-old office PCs ([docs/hardware.md](docs/hardware.md)). Do not add work to the request path that a 4th-generation Core i5 cannot do fast.
@@ -96,7 +97,7 @@ The first start downloads the LLM (2 to 5 GB). Then check it:
 curl -s http://<host>:10300/health      # "status":"ok", "stt":true, "tts":true
 docker exec assistant-hub assistant-hub probe tts "Hello." /tmp/a.wav
 docker exec assistant-hub assistant-hub probe stt /tmp/a.wav   # prints "hello"
-curl -s http://<host>:10300/llm/v1/models
+docker exec assistant-hub assistant-hub probe llm "Turn on the kitchen light."
 ```
 
 ### Step 4: connect Home Assistant through its API

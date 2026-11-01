@@ -47,3 +47,6 @@ undocumented_unsafe_blocks = "warn"
 lto = "thin"
 codegen-units = 1
 strip = "symbols"
+
+[build-dependencies]
+bindgen = { version = "0.73.2", default-features = false, features = ["runtime", "prettyplease"] }
