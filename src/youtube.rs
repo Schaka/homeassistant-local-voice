@@ -234,11 +234,56 @@ pub fn parse_uploads(answer: &Value) -> Vec<Video> {
     out
 }
 
+/// Spoken numbers as digits, so "level one techs" can match "Level1Techs".
+const NUMBER_WORDS: &[(&str, &str)] = &[
+    ("zero", "0"),
+    ("one", "1"),
+    ("two", "2"),
+    ("three", "3"),
+    ("four", "4"),
+    ("five", "5"),
+    ("six", "6"),
+    ("seven", "7"),
+    ("eight", "8"),
+    ("nine", "9"),
+    ("ten", "10"),
+];
+
+/// Lowercase letters and digits only, with spoken numbers as digits.
 fn norm(s: &str) -> String {
-    s.chars()
-        .filter(char::is_ascii_alphanumeric)
-        .flat_map(char::to_lowercase)
+    s.to_lowercase()
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .map(|w| {
+            NUMBER_WORDS
+                .iter()
+                .find(|(word, _)| *word == w)
+                .map_or(w, |(_, digit)| digit)
+        })
         .collect()
+}
+
+/// True if all characters of `short` occur in `long` in the same order.
+fn is_subsequence(short: &str, long: &str) -> bool {
+    let mut rest = long.chars();
+    short.chars().all(|c| rest.any(|l| l == c))
+}
+
+/// Shortest abbreviation, as a share of the channel name, that still counts:
+/// "lvl1techs" (9) for "level1techs" (11) counts, "jazz" for "jazzvibes" does not.
+const ABBREVIATION_SHARE: f64 = 0.7;
+
+fn name_matches(query: &str, name: &str) -> bool {
+    if query.is_empty() || name.is_empty() {
+        return false;
+    }
+    if query == name {
+        return true;
+    }
+    // An abbreviation of the name: same first letter, letters in order, long enough.
+    query.chars().next() == name.chars().next()
+        && is_subsequence(query, name)
+        && query.len() as f64 / name.len() as f64 >= ABBREVIATION_SHARE
 }
 
 /// The search words and whether the query asks for a genre or mood.
@@ -257,6 +302,7 @@ pub fn analyze(query: &str) -> (String, bool) {
 }
 
 /// The channel whose name or handle is the query, if the search found one.
+/// Spoken numbers and abbreviations count ("level one techs", "lvl1techs").
 pub fn matching_channel<'a>(query: &str, items: &'a [Item]) -> Option<&'a Channel> {
     let q = norm(query);
     let q_without_the = q.strip_prefix("the").unwrap_or(&q).to_owned();
@@ -266,7 +312,9 @@ pub fn matching_channel<'a>(query: &str, items: &'a [Item]) -> Option<&'a Channe
     items.iter().find_map(|item| match item {
         Item::Channel(c) => {
             let names = [norm(&c.title), norm(&c.handle)];
-            let hit = names.iter().any(|n| !n.is_empty() && (*n == q || *n == q_without_the));
+            let hit = names
+                .iter()
+                .any(|n| name_matches(&q, n) || name_matches(&q_without_the, n));
             hit.then_some(c)
         }
         Item::Video(_) => None,
@@ -407,6 +455,27 @@ mod tests {
         assert_eq!(first.id, "H3Cnyj0I62c");
         assert!(first.duration_secs.is_some_and(|d| d > 60), "{first:?}");
         assert_eq!(first.channel, "Linus Tech Tips");
+    }
+
+    #[test]
+    fn spoken_numbers_and_abbreviations_match_a_channel() {
+        let items = vec![Item::Channel(Channel {
+            id: "UC4w1YQAJMWOz4qtxinq55LQ".into(),
+            title: "Level1Techs".into(),
+            handle: "@Level1Techs".into(),
+        })];
+        for q in ["level one techs", "Level 1 Techs", "lvl1techs", "level1techs"] {
+            assert!(matching_channel(q, &items).is_some(), "{q}");
+        }
+        for q in ["techs", "level", "linus tech tips"] {
+            assert!(matching_channel(q, &items).is_none(), "{q}");
+        }
+        let jazz = vec![Item::Channel(Channel {
+            id: "UCx".into(),
+            title: "Jazz Vibes".into(),
+            handle: "@jazzvibes".into(),
+        })];
+        assert!(matching_channel("jazz", &jazz).is_none());
     }
 
     #[test]
