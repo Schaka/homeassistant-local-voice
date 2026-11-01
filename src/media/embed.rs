@@ -69,11 +69,12 @@ unsafe extern "C" fn log_callback(level: sys::ggml_log_level, text: *const c_cha
     if line.is_empty() {
         return;
     }
-    // GGML_LOG_LEVEL_ERROR is 4, WARN is 3.
-    if level >= 4 {
-        tracing::warn!("[embed] {line}");
-    } else {
-        tracing::debug!("[embed] {line}");
+    // ggml levels: 1 debug, 2 info, 3 warn, 4 error, 5 continuation of the
+    // previous line (for example the progress dots of a model load).
+    match level {
+        4 => tracing::warn!("[embed] {line}"),
+        3 => tracing::info!("[embed] {line}"),
+        _ => tracing::debug!("[embed] {line}"),
     }
 }
 
