@@ -61,11 +61,11 @@ Set `LLM_HF_REPO` or `LLM_MODEL_FILENAME`, not both. With neither, llama-server 
 | `LLM_GPU_LAYERS` | `auto` | Layers on the GPU. `auto` fits the model to the free memory. |
 | `LLM_CTX` | `64k` | Context size: `32k`, `64k`, `128k` or `256k`. `256k` is only for `ling3` (YaRN rope scaling) and `lfm3`. |
 | `LLM_REASONING` | `on` | Thinking mode: `on` or `off` |
-| `LLM_REASONING_BUDGET` | `512` | Maximum thinking tokens per reply. `-1` removes the limit. |
+| `LLM_REASONING_BUDGET` | Per family: `128` for `lfm3`, `256` for `minicpm5`, `512` for the others | Maximum thinking tokens per reply. `-1` removes the limit. The defaults are measured, see [llm.md](llm.md#speed-settings-per-family). |
 | `LLM_API_KEY` | empty | Empty accepts any key. With a value, `/llm/...` accepts only `Authorization: Bearer <key>`. llama-server itself listens on 127.0.0.1 without a key. |
-| `LLM_EXTRA_ARGS` | empty | More llama-server arguments, for example `--n-cpu-moe 8`. They come last and override the defaults. On a GPU (`LLM_DEVICE=Vulkan0`), set `-fa off` (flash attention off). This is a strong recommendation: with flash attention on, an Intel iGPU prefilled Ling-3.0-tiny 3.7 times slower (79 against 294 tokens/s). For Granite and MiniCPM5, it made no difference. See [igpu-backends.md](igpu-backends.md). |
+| `LLM_EXTRA_ARGS` | empty | More llama-server arguments, for example `--n-cpu-moe 8`. They come last and override the defaults, also the family defaults (sampling, thinking budget). On a GPU (`LLM_DEVICE=Vulkan0`), set `-fa off` (flash attention off). This is a strong recommendation: with flash attention on, an Intel iGPU prefilled Ling-3.0-tiny 3.7 times slower (79 against 294 tokens/s). For Granite and MiniCPM5, it made no difference. See [igpu-backends.md](igpu-backends.md). |
 | `LLM_SLOT_CACHE` | `on` | Keeps the prompt cache across restarts in `/models/llm/slots`. `off` disables it. |
-| `LLM_TEMPLATE_FIX` | `on` | For `ling3`: use the patched chat template `templates/ling3.jinja`. After a tool result, the turn starts with a closed thinking block, so the answer never ends up as thinking. `off` uses the template from the GGUF. |
+| `LLM_TEMPLATE_FIX` | `on` | For `ling3`, `lfm3` and `minicpm5`: patch the chat template from the model file so that no new thinking starts after a tool result. Ling otherwise often returns empty answers, and LFM3 and MiniCPM5 need about twice as long. `off` uses the template unchanged. See [llm.md](llm.md#the-tool-result-fix-of-the-chat-templates). |
 | `HF_TOKEN` | empty | Token for gated Hugging Face repos |
 
 ## Web search

@@ -102,6 +102,19 @@ impl Family {
         })
     }
 
+    /// Thinking tokens per reply when `LLM_REASONING_BUDGET` is not set.
+    /// Measured with 10 Home Assistant style questions (docs/llm.md): LFM3
+    /// and MiniCPM5 kept their results with these budgets and the patched
+    /// template, and answered in about half the time. Ling thinks briefly
+    /// anyway. MiniCPM5 at 128 lost quality.
+    pub fn default_reasoning_budget(self) -> &'static str {
+        match self {
+            Self::Ling3 | Self::Qwen35 | Self::Granite4 => "512",
+            Self::Minicpm5 => "256",
+            Self::Lfm3 => "128",
+        }
+    }
+
     /// The family from a model file or repository name.
     pub fn detect(name: &str) -> Option<Self> {
         let name = name.to_lowercase();
@@ -168,7 +181,6 @@ pub struct LlmConfig {
     pub internal_port: u16,
     pub hf_cache_dir: PathBuf,
     pub slot_dir: PathBuf,
-    pub templates_dir: PathBuf,
 }
 
 impl LlmConfig {
@@ -353,7 +365,8 @@ impl Config {
             gpu_layers: var_or("LLM_GPU_LAYERS", "auto"),
             ctx,
             reasoning,
-            reasoning_budget: var_or("LLM_REASONING_BUDGET", "512"),
+            reasoning_budget: var("LLM_REASONING_BUDGET")
+                .unwrap_or_else(|| family.default_reasoning_budget().to_owned()),
             api_key: var("LLM_API_KEY"),
             extra_args: var("LLM_EXTRA_ARGS")
                 .map(|a| a.split_whitespace().map(str::to_owned).collect())
@@ -363,7 +376,6 @@ impl Config {
             internal_port: 8081,
             hf_cache_dir: llm_dir.join("hf"),
             slot_dir: llm_dir.join("slots"),
-            templates_dir: PathBuf::from(var_or("TEMPLATES_DIR", "/app/templates")),
         }))
     }
 
@@ -461,6 +473,13 @@ mod tests {
     }
 
     #[test]
+    fn budgets_per_family() {
+        assert_eq!(Family::Lfm3.default_reasoning_budget(), "128");
+        assert_eq!(Family::Minicpm5.default_reasoning_budget(), "256");
+        assert_eq!(Family::Ling3.default_reasoning_budget(), "512");
+    }
+
+    #[test]
     fn slot_file_is_sanitized() {
         let cfg = LlmConfig {
             server_bin: PathBuf::new(),
@@ -479,7 +498,6 @@ mod tests {
             internal_port: 8081,
             hf_cache_dir: PathBuf::new(),
             slot_dir: PathBuf::new(),
-            templates_dir: PathBuf::new(),
         };
         assert_eq!(cfg.slot_file(), "Ling_3_tiny_Q4-64k.slot");
     }

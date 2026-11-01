@@ -9,7 +9,7 @@ All versions are in `docker-bake.hcl`. The Dockerfile repeats them as `ARG` defa
 
 ## llama.cpp (`LLAMACPP_BUILD`)
 
-1. Read the release notes between the old and the new build for changes to `llama-server` flags, the Ling 3.0 parser and the chat template (`templates/ling3.jinja` fixes a bug that upstream may fix one day, see `docs/llm.md`).
+1. Read the release notes between the old and the new build for changes to `llama-server` flags, the Ling 3.0 parser and the chat templates. `src/llm/template.rs` patches one line of the Ling, LFM3 and MiniCPM5 templates. A warning in the log ("changed upstream") means that the patch needs a new line to find.
 2. `./scripts/fetch-llama-headers.sh`, then `cargo build`. bindgen generates the bindings from the new headers. A changed struct fails the build through the layout checks, a removed function fails at runtime with a missing symbol (`dynamic_link_require_all`).
 3. Run the embedder test with the new release (`EMBED_TEST_LIB`, `EMBED_TEST_MODEL`, `cargo test real_model -- --ignored --nocapture`) and the evaluation (`src/media/eval.rs`) if you have a Jellyfin library.
 4. After the image build: `assistant-hub probe llm "Turn on the kitchen light."` must show a tool call, and `llama-server --list-devices` must still print the GPU (STT and TTS choose their device from it).

@@ -3,8 +3,9 @@
 
 pub mod proxy;
 pub mod slots;
+pub mod template;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
 use crate::config::{Ctx, Family, LlmConfig, LlmSource};
@@ -52,14 +53,7 @@ fn preset(cfg: &LlmConfig) -> Vec<String> {
         // Granite 4.0 H decodes greedily in IBM's examples.
         (Family::Granite4, _) => &["--temp", "0.0"],
     };
-    let mut out: Vec<String> = v.iter().map(|x| s(x)).collect();
-    if cfg.family == Family::Ling3 && cfg.template_fix {
-        // After a tool result the turn starts with a closed <think></think>, so
-        // the answer is never filed as reasoning (templates/ling3.jinja).
-        out.push(s("--chat-template-file"));
-        out.push(cfg.templates_dir.join("ling3.jinja").display().to_string());
-    }
-    out
+    v.iter().map(|x| s(x)).collect()
 }
 
 fn ctx_args(cfg: &LlmConfig) -> Vec<String> {
@@ -87,8 +81,9 @@ fn ctx_args(cfg: &LlmConfig) -> Vec<String> {
 /// The full llama-server command line. `offline` adds `--offline` for a
 /// Hugging Face model that is already in the cache: once cached, the server
 /// never goes online again, because llama.cpp deletes the cached copy when the
-/// upstream file gets a new ETag.
-pub fn server_args(cfg: &LlmConfig, slot_cache: bool, offline: bool) -> Vec<String> {
+/// upstream file gets a new ETag. `template` is a patched chat template
+/// ([`template`]).
+pub fn server_args(cfg: &LlmConfig, slot_cache: bool, offline: bool, template: Option<&Path>) -> Vec<String> {
     let mut args = match &cfg.source {
         LlmSource::File(path) => vec![s("-m"), path.display().to_string()],
         LlmSource::HfRepo(repo) => {
@@ -130,6 +125,9 @@ pub fn server_args(cfg: &LlmConfig, slot_cache: bool, offline: bool) -> Vec<Stri
         args.extend([s("--slot-save-path"), cfg.slot_dir.display().to_string()]);
     }
     args.extend(preset(cfg));
+    if let Some(t) = template {
+        args.extend([s("--chat-template-file"), t.display().to_string()]);
+    }
     // Last, so they override everything above.
     args.extend(cfg.extra_args.iter().cloned());
     args
@@ -176,6 +174,76 @@ async fn is_cached(cfg: &LlmConfig, repo: &str) -> bool {
     }
 }
 
+/// The GGUF file of a Hugging Face repo in llama.cpp's cache
+/// (`models--org--repo/snapshots/<sha>/<file>.gguf`), if it was downloaded.
+pub fn cached_gguf(cache_dir: &Path, repo: &str) -> Option<PathBuf> {
+    let (name, tag) = match repo.split_once(':') {
+        Some((n, t)) => (n, t.to_lowercase()),
+        None => (repo, "q4_k_m".to_owned()),
+    };
+    let folder = cache_dir
+        .join(format!("models--{}", name.replace('/', "--")))
+        .join("snapshots");
+    let mut found = Vec::new();
+    for snapshot in std::fs::read_dir(folder).ok()?.flatten() {
+        for file in std::fs::read_dir(snapshot.path()).ok()?.flatten() {
+            let path = file.path();
+            let fname = path.file_name()?.to_str()?.to_lowercase();
+            if fname.ends_with(".gguf") && fname.contains(&tag) && !fname.contains("mmproj") {
+                found.push(path);
+            }
+        }
+    }
+    found.sort();
+    found.pop()
+}
+
+/// Reads the chat template from the model file, patches it for the family and
+/// writes it next to the prompt cache. None: no patch needed or possible.
+fn patched_template(cfg: &LlmConfig, model: &Path) -> Option<PathBuf> {
+    let original = match crate::gguf::metadata_string(model, "tokenizer.chat_template") {
+        Ok(Some(t)) => t,
+        Ok(None) => {
+            tracing::warn!(
+                "{} has no chat template, llama-server uses its default",
+                model.display()
+            );
+            return None;
+        }
+        Err(err) => {
+            tracing::warn!("cannot read the chat template of {}: {err:#}", model.display());
+            return None;
+        }
+    };
+    match template::patch(cfg.family, &original) {
+        template::Outcome::NotNeeded => None,
+        template::Outcome::NoMatch(n) => {
+            tracing::warn!(
+                "the chat template of {} changed upstream ({n} matches instead of 1): it is used without the \
+                 tool-result fix, answers after a tool call may be slow or empty",
+                model.display()
+            );
+            None
+        }
+        template::Outcome::Patched(t) => {
+            let path = std::env::temp_dir().join(format!("chat-template-{}.jinja", cfg.model_name));
+            match std::fs::write(&path, t) {
+                Ok(()) => {
+                    tracing::info!(
+                        "chat template of {} patched: no new thinking after a tool result",
+                        model.display()
+                    );
+                    Some(path)
+                }
+                Err(err) => {
+                    tracing::warn!("cannot write {}: {err}", path.display());
+                    None
+                }
+            }
+        }
+    }
+}
+
 fn writable_dir(dir: &Path) -> bool {
     std::fs::create_dir_all(dir).is_ok() && tempfile_probe(dir)
 }
@@ -209,10 +277,22 @@ pub async fn child_spec(cfg: &LlmConfig) -> (ChildSpec, bool) {
             tracing::info!("{repo} is cached, llama-server starts offline");
         }
     }
+    let model_file = match &cfg.source {
+        LlmSource::File(path) => Some(path.clone()),
+        LlmSource::HfRepo(repo) => cached_gguf(&cfg.hf_cache_dir, repo),
+    };
+    let template = match (&model_file, cfg.template_fix) {
+        (Some(file), true) => patched_template(cfg, file),
+        (None, true) => {
+            tracing::info!("the model is not downloaded yet: the chat template fix applies from the next start");
+            None
+        }
+        (_, false) => None,
+    };
     let spec = ChildSpec {
         name: s("llama-server"),
         program: cfg.server_bin.clone(),
-        args: server_args(cfg, slot_cache, offline),
+        args: server_args(cfg, slot_cache, offline, template.as_deref()),
         env,
         // The hub checks the API key itself. llama-server listens on 127.0.0.1 only.
         env_remove: vec![s("LLAMA_API_KEY")],
@@ -244,7 +324,6 @@ mod tests {
             internal_port: 8081,
             hf_cache_dir: PathBuf::from("/models/llm/hf"),
             slot_dir: PathBuf::from("/models/llm/slots"),
-            templates_dir: PathBuf::from("/app/templates"),
         }
     }
 
@@ -254,14 +333,14 @@ mod tests {
             Family::Ling3,
             LlmSource::HfRepo("inclusionAI/Ling-3.0-tiny-GGUF:Q4_K_M".into()),
         );
-        let args = server_args(&c, true, true).join(" ");
+        let args = server_args(&c, true, true, Some(Path::new("/tmp/chat-template-x.jinja"))).join(" ");
         assert_eq!(
             args,
             "-hf inclusionAI/Ling-3.0-tiny-GGUF:Q4_K_M --no-mmproj --offline \
              --alias Ling-3.0-tiny-Q4_K_M --host 127.0.0.1 --port 8081 --no-ui \
              --device none -ngl auto -c 65536 --jinja --reasoning on --reasoning-budget 512 \
              --slot-save-path /models/llm/slots --temp 1.0 --top-p 0.95 --top-k 20 \
-             --chat-template-file /app/templates/ling3.jinja --n-cpu-moe 8"
+             --chat-template-file /tmp/chat-template-x.jinja --n-cpu-moe 8"
         );
     }
 
@@ -271,7 +350,7 @@ mod tests {
         c.reasoning = false;
         c.ctx = Ctx::K128;
         c.extra_args.clear();
-        let args = server_args(&c, false, false).join(" ");
+        let args = server_args(&c, false, false, None).join(" ");
         assert!(args.starts_with("-m /models/llm/g.gguf --alias"));
         assert!(args.contains("-c 131072 --jinja --reasoning off --temp 0.0"));
         assert!(!args.contains("slot-save-path"));
@@ -282,10 +361,31 @@ mod tests {
         let mut c = cfg(Family::Ling3, LlmSource::File("/m.gguf".into()));
         c.ctx = Ctx::K256;
         assert!(
-            server_args(&c, false, false)
+            server_args(&c, false, false, None)
                 .join(" ")
                 .contains("-c 262144 --rope-scaling yarn --rope-scale 2 --yarn-orig-ctx 131072")
         );
+    }
+
+    #[test]
+    fn finds_the_cached_model_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let snap = dir.path().join("models--inclusionAI--Ling-3.0-tiny-GGUF/snapshots/abc");
+        std::fs::create_dir_all(&snap).unwrap();
+        for f in [
+            "Ling-3.0-tiny-Q4_K_M.gguf",
+            "Ling-3.0-tiny-Q8_0.gguf",
+            "mmproj-Q4_K_M.gguf",
+        ] {
+            std::fs::write(snap.join(f), b"").unwrap();
+        }
+        let found = cached_gguf(dir.path(), "inclusionAI/Ling-3.0-tiny-GGUF:Q4_K_M").unwrap();
+        assert!(found.ends_with("Ling-3.0-tiny-Q4_K_M.gguf"));
+        let q8 = cached_gguf(dir.path(), "inclusionAI/Ling-3.0-tiny-GGUF:Q8_0").unwrap();
+        assert!(q8.ends_with("Ling-3.0-tiny-Q8_0.gguf"));
+        // Without a tag, llama.cpp takes Q4_K_M.
+        assert!(cached_gguf(dir.path(), "inclusionAI/Ling-3.0-tiny-GGUF").is_some());
+        assert!(cached_gguf(dir.path(), "other/repo:Q4_K_M").is_none());
     }
 
     #[test]

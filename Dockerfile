@@ -162,7 +162,6 @@ COPY --from=searxng-stage /opt/searxng /opt/searxng
 COPY --from=rust-builder /assistant-hub /usr/local/bin/assistant-hub
 # The model spec of the same audio.cpp commit as the binary.
 COPY --from=audiocpp-builder /audio.cpp/model_specs/pocket_tts.json /app/model_specs/pocket_tts.json
-COPY templates /app/templates
 
 ENV STT_MODEL_FILENAME=${STT_MODEL_FILENAME} \
     TTS_MODEL_FILENAME=${TTS_MODEL_FILENAME} \

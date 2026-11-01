@@ -2,7 +2,7 @@
 
 This page shows which small models work as the conversation agent of Home Assistant on a CPU, and which do not. Read it before you try another model: most of the tested models were too slow or not reliable enough.
 
-All results are from 2026-10-31.
+All results are from 2026-10-31. The speed of LFM3 and MiniCPM5 improved later with the tool-result fix and smaller thinking budgets ([llm.md](llm.md#speed-settings-per-family)).
 
 ## Recommendations
 
@@ -84,7 +84,7 @@ A fast model is not enough. Granite 4.0 H Tiny was the fastest, but it gave answ
 
 | Problem | Fix |
 |---|---|
-| With thinking on, Ling sometimes wrote its answer after a tool result into an open `<think>` block. llama.cpp then returned no answer, and Home Assistant gave up with "Unable to get response". | The image ships a patched Ling template (`templates/ling3.jinja`), see [llm.md](llm.md#patched-chat-template-for-ling). |
+| With thinking on, Ling sometimes wrote its answer after a tool result into an open `<think>` block. llama.cpp then returned no answer, and Home Assistant gave up with "Unable to get response". LFM3 and MiniCPM5 thought again from scratch before each answer, because Home Assistant does not send their thinking back. | The server patches the templates of Ling, LFM3 and MiniCPM5 at start, see [llm.md](llm.md#the-tool-result-fix-of-the-chat-templates). For LFM3 and MiniCPM5, this and a smaller thinking budget halved the time per question (2026-11-01). |
 | In long conversations, Ling stopped thinking, because the template marks every earlier answer with an empty thinking block. | Not changed. With thinking in long conversations, the answers took much longer. |
 | Small models put the year of their training data into web search queries ("World Cup 2022"). | The search tool replaces an older year with the current year in questions about recent events. |
 | Models chose the speaker of a voice satellite or a TV box as the music player. | Expose only the music players of the rooms to Assist. |

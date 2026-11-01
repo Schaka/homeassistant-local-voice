@@ -68,7 +68,7 @@ Other OpenAI-compatible clients use the same URL, for example the "llama.cpp ser
 | `qwen35` | Qwen3.5-4B | 4B dense | Yes |
 | `granite4` | Granite 4.0 H Tiny (and H Micro, not tested) | 7B MoE, about 1B active per token, mostly Mamba-2 layers | No |
 
-For the models with thinking, the thinking text goes to `reasoning_content`, so TTS does not speak it. Thinking adds time before the reply. `LLM_REASONING=off` turns it off, and `LLM_REASONING_BUDGET` (default 512 tokens) limits it.
+For the models with thinking, the thinking text goes to `reasoning_content`, so TTS does not speak it. Thinking adds time before the reply. `LLM_REASONING=off` turns it off, and `LLM_REASONING_BUDGET` limits it. The default budget depends on the family, see "Speed settings per family" below.
 
 ### Set the sampling in Home Assistant
 
@@ -109,8 +109,8 @@ Add about 1.7 GB for STT and TTS (about 2.4 GB with the STT model `tdt-1.1b-q8_0
 Measured through Home Assistant on a CPU (i5-12400T), see [model-comparison.md](model-comparison.md):
 
 1. Ling-3.0-tiny Q4_K_M: the default. All answers correct, 5 to 7 s.
-2. MiniCPM5-2B Q4_K_M: good answers, 15 to 17 s, smaller file.
-3. LFM3-1.7B Q4_K_M: all answers correct, but 23 to 26 s. Keep its thinking on (`LLM_REASONING=on`, the default).
+2. MiniCPM5-2B Q4_K_M: good answers, 15 to 17 s, smaller file. Also faster now, see below.
+3. LFM3-1.7B Q4_K_M: all answers correct, but 23 to 26 s in this test, which ran before the tool-result fix and the smaller thinking budget. With both, it answered in about half the time (see below). Keep its thinking on (`LLM_REASONING=on`, the default).
 4. Granite 4.0 H Tiny Q4_K_M: the fastest (3 s), but less reliable.
 5. Qwen3.5-4B Q4_K_M: correct, but 20 s.
 
@@ -142,11 +142,36 @@ The first request after a restart then takes about 0.5 s instead of more than 60
 
 If a backup tool stops the container every night, the cache survives, but voice control is off during the backup. Exclude the container from such a backup. You can download the models again.
 
-## Patched chat template for Ling
+## The tool-result fix of the chat templates
 
-After a tool result, the original Ling template starts the answer with an open `<think>`. Ling then often writes its answer at once and never closes the block. llama-server then returns the answer as thinking (`reasoning_content`), and the reply text is empty. With the patched template `templates/ling3.jinja`, the turn after a tool result starts with a closed `<think></think>`, and the problem did not occur. Ling still thinks after a user message, where it decides which tool to call.
+Home Assistant's llama.cpp integration sends the text and the tool calls of earlier answers back to the model, but not their thinking. The templates of Ling 3.0, LFM3 and MiniCPM5 open a new thinking block after every tool result. So the model thinks again from scratch before it reports a result, and Ling often writes its answer into the open block, which leaves the reply empty.
 
-Upstream status: llama.cpp b11057 added a Ling 3.0 parser for a tool call inside an unclosed thinking block (issue #27462). It does not cover a plain answer without `</think>`, which is the case that the patched template fixes. The case can be reported in that issue with a recorded request, and the template patch can go to the model's Hugging Face repository.
+At each start, `assistant-hub` reads the chat template from the model file, changes one line, and passes the result to llama-server (`src/llm/template.rs`): after a tool result, the answer starts with a closed thinking block. The model still thinks after a user message, where it decides which tool to call. The repository holds no copy of the templates, so a new upstream template is used as soon as it ships. If the line to change is missing, the log warns and the original template is used. `LLM_TEMPLATE_FIX=off` turns the fix off. For a model from `LLM_HF_REPO`, the fix starts with the second start, after the download.
+
+Upstream status: llama.cpp b11057 added a Ling 3.0 parser for a tool call inside an unclosed thinking block (issue #27462). It does not cover a plain answer without `</think>`, which is the case that the fix covers.
+
+## Speed settings per family
+
+Measured on 2026-11-01 with 10 Home Assistant style questions: a question, a tool call, the tool result, the answer (lights, weather, sensor values, music, small talk). The history was sent the way Home Assistant sends it, without thinking. llama-server b11966, 6 threads of a Core Ultra 7 270K. The time is the mean per question after the first one, which also prefills the whole prompt.
+
+| Model | Setting | Correct | Time per question |
+|---|---|---|---|
+| LFM3-1.7B Q4_K_M | Original template, budget 512 | 9 of 10 | 14.9 s |
+| LFM3-1.7B Q4_K_M | Fix, budget 256 | 9 of 10 | 9.9 s |
+| LFM3-1.7B Q4_K_M | Fix, budget 128 (default) | 9 of 10 | 8.3 s |
+| MiniCPM5-2B Q4_K_M | Original template, budget 512 | 9 of 10 | 11.7 s |
+| MiniCPM5-2B Q4_K_M | Original template, budget 128 | 9 of 10 | 8.5 s, but one answer continued its thinking aloud |
+| MiniCPM5-2B Q4_K_M | Fix, budget 512 | 9 of 10 | 8.0 s |
+| MiniCPM5-2B Q4_K_M | Fix, budget 256 (default) | 9 of 10 | 5.9 s |
+| MiniCPM5-2B Q4_K_M | Fix, budget 128 | 7 of 10 | 6.2 s |
+| Ling-3.0-tiny Q4_K_M | Fix, budget 512 (default) | 9 of 10 | 2.9 s |
+| Ling-3.0-tiny Q4_K_M | Fix, budget 128 | 9 of 10 | 3.3 s |
+
+So the defaults of `LLM_REASONING_BUDGET` are 128 for `lfm3`, 256 for `minicpm5` and 512 for the others. Set the variable, or `--reasoning-budget` in `LLM_EXTRA_ARGS`, to choose another value. The question that all models got wrong was "turn off all the lights downstairs": they switched one room instead of the floor. The prompt of Home Assistant, with floors and areas, helps there.
+
+The token speed was not the problem: LFM3 generated 42 tokens per second, MiniCPM5 25 and Ling 35 on this CPU. The time went into thinking. Other settings did not help:
+
+1. A smaller micro-batch (`-ub 128` or `-ub 256`) or denser context checkpoints (`--checkpoint-min-step 0`). LFM3 and Ling have layers without a KV cache, which llama.cpp can only rewind to a saved checkpoint. With the defaults, LFM3 processes about 500 tokens again for each request (about 3 s here). The smaller micro-batches made one of the two request types fast and the other one process the whole prompt again. Ling processes only 60 to 150 tokens again with the defaults.
 
 ## Limits
 

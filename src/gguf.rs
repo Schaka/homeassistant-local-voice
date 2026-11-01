@@ -116,6 +116,29 @@ impl<R: Read + Seek> Reader<R> {
     }
 }
 
+/// A string value from the GGUF metadata, for example `tokenizer.chat_template`.
+/// None if the file has no such key or the value is no string.
+pub fn metadata_string(path: &Path, wanted: &str) -> Result<Option<String>> {
+    let mut r = Reader {
+        inner: BufReader::new(File::open(path)?),
+    };
+    if &r.bytes::<4>()? != b"GGUF" {
+        bail!("not a GGUF file (bad magic)");
+    }
+    r.u32()?; // version
+    r.u64()?; // tensor count
+    let kvs = r.u64()?;
+    for _ in 0..kvs {
+        let key = r.string()?;
+        let t = r.u32()?;
+        if key == wanted.as_bytes() && t == STRING {
+            return Ok(Some(String::from_utf8_lossy(&r.string()?).into_owned()));
+        }
+        r.skip_value(t)?;
+    }
+    Ok(None)
+}
+
 /// Minimum file size that the header declares: data start plus the end of the
 /// last tensor.
 pub fn expected_min_size(path: &Path) -> Result<u64> {
@@ -230,5 +253,34 @@ mod tests {
         let mut bad = tempfile::NamedTempFile::new().unwrap();
         bad.write_all(b"NOPE").unwrap();
         assert!(!check(bad.path()));
+    }
+}
+
+#[cfg(test)]
+mod metadata_tests {
+    use super::*;
+
+    #[test]
+    fn reads_a_string_value() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("m.gguf");
+        let mut f = Vec::new();
+        f.extend_from_slice(b"GGUF");
+        f.extend_from_slice(&3u32.to_le_bytes());
+        f.extend_from_slice(&0u64.to_le_bytes()); // tensors
+        f.extend_from_slice(&2u64.to_le_bytes()); // kvs
+        for (key, value) in [("general.name", "test"), ("tokenizer.chat_template", "{{ messages }}")] {
+            f.extend_from_slice(&(key.len() as u64).to_le_bytes());
+            f.extend_from_slice(key.as_bytes());
+            f.extend_from_slice(&STRING.to_le_bytes());
+            f.extend_from_slice(&(value.len() as u64).to_le_bytes());
+            f.extend_from_slice(value.as_bytes());
+        }
+        std::fs::write(&path, f).unwrap();
+        assert_eq!(
+            metadata_string(&path, "tokenizer.chat_template").unwrap().as_deref(),
+            Some("{{ messages }}")
+        );
+        assert_eq!(metadata_string(&path, "missing").unwrap(), None);
     }
 }
