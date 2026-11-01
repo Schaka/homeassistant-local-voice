@@ -92,9 +92,18 @@ docker buildx bake final \
   --set '*.args.STT_MODEL_NAME=parakeet-ctc-1.1b'
 ```
 
-## GPU selection
+## GPU or CPU
 
-The image finds the GPU through Mesa. `PARAKEET_DEVICE` (default `Vulkan0`) selects the GPU for STT, and `VK_DEVICE` (default `0`) selects it for TTS. Without a GPU, Vulkan device 0 is llvmpipe on the CPU.
+At start, the server asks llama.cpp for the Vulkan GPUs (`llama-server --list-devices`). The log shows the result:
+
+```text
+INFO no Vulkan GPU found, STT and TTS run on the CPU
+INFO STT device cpu, TTS backend cpu with 4 threads
+```
+
+With a GPU, STT uses the first one (`Vulkan0`) and TTS uses Vulkan device 0. Without a GPU, both use the CPU backend of ggml. Mesa's software driver llvmpipe is no option: ggml does not use it, and audio.cpp fails without a Vulkan device. `PARAKEET_DEVICE`, `TTS_BACKEND`, `VK_DEVICE` and `TTS_THREADS` override the choice ([configuration.md](configuration.md#text-to-speech-tts)).
+
+Speech is fast on a CPU with AVX2: 0.15 to 0.25 s for STT and 0.7 s for TTS per sentence on 4 cores ([hardware.md](hardware.md#measured-speech-on-the-cpu)).
 
 ## Test without Home Assistant
 

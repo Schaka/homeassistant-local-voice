@@ -1,6 +1,6 @@
 # homeassistant-local-voice
 
-A self-hosted voice assistant backend for Home Assistant in one container and on one port. One Rust server (`assistant-hub`) answers all requests. It serves Wyoming STT and TTS, the conversation agent under `/llm`, MCP tools on `/mcp`, and web and YouTube searches. It uses Vulkan on almost any GPU. Without a GPU, it uses the CPU.
+A self-hosted voice assistant backend for Home Assistant in one container and on one port. One Rust server (`assistant-hub`) answers all requests. It serves Wyoming STT and TTS, the conversation agent under `/llm`, MCP tools on `/mcp`, and web and YouTube searches. It uses Vulkan on almost any GPU. Without a GPU, it runs on the CPU, also on 10-year-old office PCs ([docs/hardware.md](docs/hardware.md)).
 
 ## Features
 
@@ -12,7 +12,7 @@ A self-hosted voice assistant backend for Home Assistant in one container and on
 | Web search tool for the agent | [SearXNG](https://github.com/searxng/searxng), embedded as a library (no SearXNG server) | Off |
 | YouTube search (`/youtube/search`) | YouTube's own web API (InnerTube), no key | On |
 
-The image contains its own Mesa Vulkan drivers (RADV for AMD, ANV for Intel, llvmpipe for the CPU). You do not install drivers, ROCm or CUDA on the host.
+The image contains its own Mesa Vulkan drivers (RADV for AMD, ANV for Intel). You do not install drivers, ROCm or CUDA on the host. Without a GPU, STT and TTS run on the CPU backend of ggml.
 
 ## How it fits together
 
@@ -29,7 +29,7 @@ The server sorts each connection by its first byte: a Wyoming client starts with
 
 ## Quick start
 
-1. Start the container. Pass through the GPU render node:
+1. Make sure that the CPU has AVX2 (`grep -c avx2 /proc/cpuinfo` is not 0). Start the container. If the host has a GPU, pass through its render node:
 
    ```bash
    docker run -d --name assistant-hub \
@@ -42,22 +42,28 @@ The server sorts each connection by its first byte: a Wyoming client starts with
 3. Go to Settings > Voice assistants > Add assistant. Select `parakeet` for speech to text and `audiocpp` for text to speech.
 4. Select a conversation agent. You can use a cloud model or the local LLM of this image, see [docs/llm.md](docs/llm.md).
 
-If the host has no GPU, the container uses the CPU. Speech is then slower but works.
+Without a GPU, leave out the `--device` and `--group-add` lines. Speech then runs on the CPU: about 0.2 s for STT and 0.7 s for TTS per sentence on 4 modern cores.
+
+[docs/home-assistant.md](docs/home-assistant.md) continues with the agent, tools, sentence triggers and automations. [examples/](examples/) has tested Home Assistant files. AI agents start with [AGENTS.md](AGENTS.md).
 
 ## Memory targets
 
 | What runs | Memory |
 |---|---|
-| STT and TTS with the default models | About 1.7 GB of GPU memory (or RAM on an iGPU), so a 2 GB GPU is enough |
+| STT and TTS with the default models | About 1.7 GB of GPU memory (or RAM on an iGPU), so a 2 GB GPU is enough. On the CPU: about 1.4 GB of RAM. |
 | Plus Ling-3.0-tiny Q4_K_M at 64k context, on the CPU | About 5 GB of RAM |
 | Plus Granite 4.0 H Tiny Q4_K_M at 64k context, on the CPU | About 4.5 GB of RAM (estimate: the file is 4.23 GB) |
 
-[docs/llm.md](docs/llm.md) has the full table for each model and quant.
+[docs/llm.md](docs/llm.md) has the full table for each model and quant. [docs/hardware.md](docs/hardware.md) recommends models for each kind of hardware, from a 4th-generation Core i5 to a GPU server.
 
 ## Documentation
 
 | Document | Content |
 |---|---|
+| [docs/hardware.md](docs/hardware.md) | Minimum requirements, measured speeds, models for old office PCs, mini PCs and GPUs |
+| [docs/home-assistant.md](docs/home-assistant.md) | Home Assistant setup step by step: speech, agent, tools, sentence triggers, YouTube, ideas for automations |
+| [examples/](examples/) | Tested Home Assistant files: prompt, tool scripts, automations |
+| [AGENTS.md](AGENTS.md) | Instructions for AI agents: work on the code, or set up a home through the Home Assistant API |
 | [docs/architecture.md](docs/architecture.md) | The server, its routes, the child processes, the build and CI |
 | [docs/voice.md](docs/voice.md) | STT and TTS: models, other languages and voices, GPU notes, test clients |
 | [docs/llm.md](docs/llm.md) | The conversation agent: cloud models, the local LLM, supported models, Vulkan or CPU, prompt cache |
@@ -66,7 +72,7 @@ If the host has no GPU, the container uses the CPU. Speech is then slower but wo
 | [docs/search.md](docs/search.md) | Web search (MCP tool and `/web/search`) and YouTube search |
 | [docs/configuration.md](docs/configuration.md) | All environment variables, build arguments and ports |
 | [docs/home-llm-prompt.md](docs/home-llm-prompt.md) | A tested system prompt for the Local LLM (HomeLLM) add-on |
-| [docs/hardware-notes.md](docs/hardware-notes.md) | Notes for old AMD GPUs (GCN 1.0, 2 GB) |
+| [docs/hardware-notes.md](docs/hardware-notes.md) | Notes for old AMD GPUs (GCN 1.0, 2 GB), from the old image |
 
 ## Attributions
 

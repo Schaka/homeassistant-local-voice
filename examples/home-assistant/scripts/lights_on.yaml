@@ -1,0 +1,26 @@
+# Tool for the LLM: which lights are on, grouped by floor and room.
+# Light groups are left out, so each light counts once.
+alias: Lights on
+description: Lists which lights are on now, grouped by floor and room. Use it for every question about which lights are on or off, in a room, on a floor or in the whole house.
+mode: parallel
+icon: mdi:lightbulb-group
+sequence:
+  - variables:
+      exposed: >-
+        {{ states.light | rejectattr('attributes.entity_id', 'defined')
+           | rejectattr('attributes.group_entities', 'defined')
+           | map(attribute='entity_id') | select('is_state', 'on') | list }}
+      result: >-
+        {%- set ns = namespace(floors={}) -%}
+        {%- for e in exposed -%}
+          {%- set a = area_id(e) -%}
+          {%- set fl = namespace(name='No floor') -%}
+          {%- for f in floors() if a and a in floor_areas(f) -%}{%- set fl.name = floor_name(f) -%}{%- endfor -%}
+          {%- set room = area_name(a) if a else 'No room' -%}
+          {%- set rooms = ns.floors.get(fl.name, {}) -%}
+          {%- set rooms = dict(rooms, **{room: rooms.get(room, []) + [state_attr(e, 'friendly_name')]}) -%}
+          {%- set ns.floors = dict(ns.floors, **{fl.name: rooms}) -%}
+        {%- endfor -%}
+        {{ {'lights_on': ns.floors, 'count': exposed | count, 'note': 'Rooms not listed have no light on.'} }}
+  - stop: done
+    response_variable: result

@@ -1,0 +1,76 @@
+# Tool for the LLM. Replace weather.forecast_home with your weather entity.
+alias: Weather forecast
+icon: mdi:weather-partly-cloudy
+description: Gets the weather forecast for today, tomorrow or the next days, with values for morning, afternoon and evening. Use it for every question about
+  future weather, rain, temperature, wind or sun.
+mode: parallel
+fields:
+  day:
+    name: Day
+    description: today, tomorrow or week. Default is today.
+    required: false
+    example: tomorrow
+    selector:
+      select:
+        options:
+        - today
+        - tomorrow
+        - week
+sequence:
+- action: weather.get_forecasts
+  target:
+    entity_id: weather.forecast_home
+  data:
+    type: daily
+  response_variable: daily
+- action: weather.get_forecasts
+  target:
+    entity_id: weather.forecast_home
+  data:
+    type: hourly
+  response_variable: hourly
+- variables:
+    result: |
+      {%- set d = day if day is defined and day in ['today', 'tomorrow', 'week'] else 'today' -%}
+      {%- set fc_d = daily['weather.forecast_home'].forecast -%}
+      {%- set fc_h = hourly['weather.forecast_home'].forecast -%}
+      {%- set ns = namespace(days=[], parts=[], high=none, low=none) -%}
+      {%- if d == 'week' -%}
+        {%- for f in fc_d -%}
+          {%- set t = as_local(as_datetime(f.datetime)) -%}
+          {%- set ns.days = ns.days + [{'day': t.strftime('%A'), 'condition': f.condition, 'high_c': f.temperature | round(0) | int, 'low_c': f.templow | round(0) | int, 'rain_mm': f.precipitation, 'rain_chance_pct': f.precipitation_probability | round(0) | int, 'wind_kmh': f.wind_speed | round(0) | int}] -%}
+        {%- endfor -%}
+      {%- else -%}
+        {%- set target = (now() + timedelta(days=1 if d == 'tomorrow' else 0)).date() -%}
+        {%- for f in fc_d -%}
+          {%- if as_local(as_datetime(f.datetime)).date() == target -%}
+            {%- set ns.high = f.temperature | round(0) | int -%}
+            {%- set ns.low = f.templow | round(0) | int -%}
+          {%- endif -%}
+        {%- endfor -%}
+        {%- for name, lo, hi in [['morning', 6, 12], ['afternoon', 12, 18], ['evening', 18, 24]] -%}
+          {%- set p = namespace(t=[], r=0, pr=0, w=0, g=0, uv=0, c=[]) -%}
+          {%- for f in fc_h -%}
+            {%- set t = as_local(as_datetime(f.datetime)) -%}
+            {%- if t.date() == target and lo <= t.hour < hi -%}
+              {%- set p.t = p.t + [f.temperature] -%}
+              {%- set p.r = p.r + (f.precipitation or 0) -%}
+              {%- set p.pr = [p.pr, f.precipitation_probability or 0] | max -%}
+              {%- set p.w = [p.w, f.wind_speed or 0] | max -%}
+              {%- set p.g = [p.g, f.wind_gust_speed or 0] | max -%}
+              {%- set p.uv = [p.uv, f.uv_index or 0] | max -%}
+              {%- if f.condition not in p.c -%}{%- set p.c = p.c + [f.condition] -%}{%- endif -%}
+            {%- endif -%}
+          {%- endfor -%}
+          {%- if p.t -%}
+            {%- set ns.parts = ns.parts + [{'part': name, 'temp_c': (p.t | min | round(0) | int) ~ ' to ' ~ (p.t | max | round(0) | int), 'conditions': p.c | join(', '), 'rain_mm': p.r | round(1), 'rain_chance_pct': p.pr | round(0) | int, 'wind_kmh': p.w | round(0) | int, 'gusts_kmh': p.g | round(0) | int, 'uv_max': p.uv | round(1)}] -%}
+          {%- endif -%}
+        {%- endfor -%}
+      {%- endif -%}
+      {%- if d == 'week' -%}
+      {{ {'forecast_for': 'next days', 'days': ns.days} }}
+      {%- else -%}
+      {{ {'forecast_for': d ~ ', ' ~ target.strftime('%A %d %B'), 'high_c': ns.high, 'low_c': ns.low, 'parts_of_day': ns.parts} }}
+      {%- endif -%}
+- stop: Forecast ready
+  response_variable: result

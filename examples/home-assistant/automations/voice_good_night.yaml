@@ -1,0 +1,53 @@
+# "good night": lights, music and the TV off, then the weather for tomorrow.
+# No LLM, so it answers at once. Lights in the bedroom stay on unless the
+# sentence ends with "sleep well". Replace the entities in the variables.
+alias: "Voice: good night"
+description: Turns off lights, music and the TV, then says the weather for tomorrow.
+mode: single
+triggers:
+  - trigger: conversation
+    command:
+      - good night
+      - goodnight
+      - (I'm | I am | we're | we are) going to bed
+      - (good night | goodnight) sleep well
+variables:
+  sleep_well: "{{ 'sleep well' in (trigger.sentence | default('') | lower) }}"
+  keep: "{{ [] if sleep_well else area_entities('bedroom') }}"
+  lights_off: >-
+    {{ states.light | selectattr('state', 'eq', 'on') | map(attribute='entity_id')
+       | reject('in', keep) | list }}
+  music_pause: >-
+    {{ states.media_player | selectattr('state', 'eq', 'playing') | map(attribute='entity_id')
+       | reject('in', keep) | list }}
+actions:
+  - if: "{{ music_pause | count > 0 }}"
+    then:
+      - action: media_player.media_pause
+        target:
+          entity_id: "{{ music_pause }}"
+        continue_on_error: true
+  - if: "{{ lights_off | count > 0 }}"
+    then:
+      - action: light.turn_off
+        target:
+          entity_id: "{{ lights_off }}"
+  - action: script.turn_on
+    target:
+      entity_id: script.tv_off
+  - action: weather.get_forecasts
+    target:
+      entity_id: weather.forecast_home
+    data:
+      type: daily
+    response_variable: fc
+  - variables:
+      t: >-
+        {{ (fc['weather.forecast_home'].forecast
+            | selectattr('datetime', 'search', (now() + timedelta(days=1)).strftime('%Y-%m-%d'))
+            | list or [none])[0] }}
+  - set_conversation_response: >-
+      Good night{{ ', sleep well' if sleep_well }}.
+      {%- if lights_off | count > 0 %} I turned off {{ lights_off | count }} {{ 'light' if lights_off | count == 1 else 'lights' }}.{% endif %}
+      {%- if t %} Tomorrow: {{ t.temperature | round(0) | int }} degrees
+      {%- if (t.precipitation_probability | default(0)) >= 40 %}, {{ t.precipitation_probability | int }} percent chance of rain{% endif %}.{% endif %}

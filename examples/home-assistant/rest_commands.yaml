@@ -1,0 +1,10 @@
+# Include it in configuration.yaml with:  rest_command: !include rest_commands.yaml
+# Replace <host> with the address of the assistant-hub container.
+assistant_hub_youtube_search:
+  url: http://<host>:10300/youtube/search?q={{ query | urlencode }}
+  method: get
+  timeout: 20
+assistant_hub_web_search:
+  url: http://<host>:10300/web/search?q={{ query | urlencode }}&max_results=3
+  method: get
+  timeout: 20

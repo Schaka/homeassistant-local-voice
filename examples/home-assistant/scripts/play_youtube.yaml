@@ -1,0 +1,70 @@
+# Tool for the LLM: plays a YouTube video on an Android TV box and turns the TV on.
+#
+# Needs:
+#   - rest_command.assistant_hub_youtube_search (rest_commands.yaml)
+#   - the "Android Debug Bridge" integration for the box. Replace
+#     media_player.tv_box with its entity.
+#
+# The box opens the video in TizenTube, else SmartTube, else the YouTube app.
+# The step "TV on over HDMI-CEC" works on boxes with an Amlogic chip and a root
+# ADB shell (for example the Ugoos AM6B+). Remove it on other boxes, or turn
+# the TV on in another way.
+alias: Play on YouTube
+description: >-
+  Plays a YouTube video on the TV and turns the TV on. Use it when the user wants to watch
+  something, wants a YouTube channel or video, or wants something on the TV. A channel name
+  plays its newest video. Returns a sentence to say.
+mode: single
+fields:
+  query:
+    description: Only the search words, for example a channel name ("Linus Tech Tips") or a topic ("some jazz"). Leave out "play", "on the TV" and "on YouTube".
+    required: true
+    example: Linus Tech Tips
+    selector:
+      text: {}
+variables:
+  box: media_player.tv_box
+sequence:
+  - action: rest_command.assistant_hub_youtube_search
+    data:
+      query: "{{ query | trim }}"
+    response_variable: r
+    continue_on_error: true
+  - variables:
+      pick: >-
+        {% if r is defined and r.status == 200 and r.content is mapping and r.content.video_id is defined %}
+          {{ {'id': r.content.video_id, 'title': r.content.title, 'channel': r.content.channel, 'kind': r.content.kind} }}
+        {% else %}
+          {{ {'id': ''} }}
+        {% endif %}
+  - if: "{{ pick.id == '' }}"
+    then:
+      - variables:
+          result:
+            text: I found nothing on YouTube for {{ query | trim }}.
+      - stop: Nothing found
+        response_variable: result
+  - alias: TV on over HDMI-CEC (Amlogic boxes only), Image View On and Active Source
+    action: androidtv.adb_command
+    data:
+      entity_id: "{{ box }}"
+      command: >-
+        pa=$(cat /sys/class/cec/physical_addr); echo 40 04 > /sys/class/cec/cmd; sleep 1;
+        echo 4f 82 $(echo $pa | cut -c1-2) $(echo $pa | cut -c3-4) > /sys/class/cec/cmd
+    continue_on_error: true
+  - alias: Open the video, TizenTube first, then SmartTube, then YouTube
+    action: androidtv.adb_command
+    data:
+      entity_id: "{{ box }}"
+      command: >-
+        u='https://www.youtube.com/watch?v={{ pick.id }}';
+        for p in io.gh.reisxd.tizentube.cobalt org.smarttube.stable com.google.android.youtube.tv;
+        do if pm path $p >/dev/null 2>&1; then am start -f 0x10000000 -a android.intent.action.VIEW -d "$u" -p $p; break; fi; done
+  - variables:
+      result:
+        text: >-
+          {% if pick.kind == 'channel_latest' %}Playing the newest video from {{ pick.channel }}, {{ pick.title }}.
+          {%- elif pick.kind == 'live' %}Playing the livestream {{ pick.title }}.
+          {%- else %}Playing {{ pick.title }} by {{ pick.channel }}.{% endif %}
+  - stop: Done
+    response_variable: result

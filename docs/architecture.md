@@ -12,7 +12,7 @@ The container runs one Rust server, `assistant-hub`, on one port (10300). It is 
 | TTS: audiocpp_server | Child process. The hub restarts it after an exit. | 127.0.0.1:8100 |
 | LLM: llama-server | Child process. It starts only with a model setting. | 127.0.0.1:8081 |
 
-`assistant-hub` starts the child processes and restarts them 2 s after they exit. On SIGTERM it saves the prompt cache of llama-server, stops the children and exits. A stop takes less than a second.
+At start, `assistant-hub` asks `llama-server --list-devices` for the Vulkan GPUs. Without one, STT and TTS run on the CPU. Then it starts the child processes and restarts them 2 s after they exit. On SIGTERM it saves the prompt cache of llama-server, stops the children and exits. A stop takes less than a second.
 
 ## One port
 
@@ -47,7 +47,7 @@ STT and TTS share one GPU lock, so they never run on the GPU at the same time. T
 | `src/config.rs` | Environment variables |
 | `src/server.rs` | Listener, first-byte check, HTTP routes |
 | `src/wyoming/` | Wyoming framing and the STT and TTS handler |
-| `src/stt.rs`, `src/tts.rs`, `src/audio.rs`, `src/gpu.rs` | parakeet.cpp binding, audiocpp client and text cleanup, PCM and WAV, GPU lock |
+| `src/stt.rs`, `src/tts.rs`, `src/audio.rs`, `src/gpu.rs` | parakeet.cpp binding, audiocpp client and text cleanup, PCM and WAV, GPU detection and GPU lock |
 | `src/llm/` | llama-server arguments per model family, the proxy, the prompt cache |
 | `src/search.rs`, `src/youtube.rs`, `src/mcp.rs` | SearXNG through PyO3, YouTube search, MCP |
 | `src/supervisor.rs` | Child processes |
@@ -75,8 +75,8 @@ The Dockerfile has these stages, all on Debian 13 "trixie":
 2. parakeet.cpp and llama.cpp as prebuilt Vulkan releases.
 3. The default STT and TTS models.
 4. SearXNG at a pinned commit, with its packages in `/opt/searxng/lib` for Python 3.13.
-5. `assistant-hub` with cargo-chef: the dependencies build in their own cached layer, so a code change rebuilds only the crate.
-6. Runtime: `debian:trixie-slim` with Mesa Vulkan drivers, `libpython3.13` (for the embedded SearXNG) and `tini`. There is no Python interpreter binary, no pip and no compiler in the image.
+5. `assistant-hub` with cargo-chef (pinned image tag): the dependencies build in their own cached layer, so a code change rebuilds only the crate.
+6. Runtime: `debian:trixie-slim` with Mesa Vulkan drivers (RADV, ANV), `libpython3.13` (for the embedded SearXNG) and `tini`. There is no Python interpreter binary, no pip and no compiler in the image.
 
 `docker-bake.hcl` holds every pinned version. `docker buildx bake final` locally builds the same image as CI.
 

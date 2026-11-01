@@ -1,0 +1,46 @@
+# Motion light: warm amber at 25 % at night (easy on the eyes, enough to see),
+# warm white by day. It turns the lights off 2 min after the motion ends, but
+# only lights that it turned on itself: a light that a person switched on stays on.
+# Needs binary_sensor.night_light (templates/night_light.yaml) and a toggle
+# helper input_boolean.hallway_light_on_by_motion. Replace the entities.
+alias: "Motion: hallway light"
+description: Motion turns on the hallway lights, amber at night, white by day, and off 2 min after the motion ends.
+mode: restart
+variables:
+  lights:
+    - light.hallway_ceiling
+  motion: binary_sensor.hallway_motion
+  flag: input_boolean.hallway_light_on_by_motion
+triggers:
+  - trigger: state
+    entity_id: binary_sensor.hallway_motion
+    to: "on"
+actions:
+  - if:
+      - condition: template
+        value_template: "{{ lights | select('is_state', 'on') | list | count == 0 and is_state('sun.sun', 'below_horizon') }}"
+    then:
+      - action: light.turn_on
+        target:
+          entity_id: "{{ lights }}"
+        data: >-
+          {{ {'brightness_pct': 25, 'hs_color': [30, 95]} if is_state('binary_sensor.night_light', 'on')
+             else {'brightness_pct': 100, 'color_temp_kelvin': 2700} }}
+      - action: input_boolean.turn_on
+        target:
+          entity_id: "{{ flag }}"
+  - condition: template
+    value_template: "{{ is_state(flag, 'on') }}"
+  - wait_template: "{{ is_state(motion, 'off') }}"
+    timeout: "00:30:00"
+  - delay: "00:02:00"
+  - if:
+      - condition: template
+        value_template: "{{ is_state(flag, 'on') }}"
+    then:
+      - action: light.turn_off
+        target:
+          entity_id: "{{ lights }}"
+      - action: input_boolean.turn_off
+        target:
+          entity_id: "{{ flag }}"

@@ -30,7 +30,7 @@ The image contains the default STT and TTS models. Mount a folder only to use ot
 |---|---|---|
 | `STT_MODEL_FILENAME` | `parakeet-ctc-0.6b-q8_0.gguf` | Model file in `/models/stt` |
 | `STT_MODEL_NAME` | `parakeet-ctc-0.6b` | Model name that Home Assistant shows |
-| `PARAKEET_DEVICE` | `Vulkan0` | Vulkan device for STT |
+| `PARAKEET_DEVICE` | empty | Device for STT: `Vulkan0`, `Vulkan1` or `cpu`. Empty selects the first Vulkan GPU, or the CPU if there is none. |
 | `STT_DEBUG_DIR` | empty | Folder for recordings of every STT request (WAV and transcript, newest 200). Use it to compare models on real requests, then turn it off. |
 
 ## Text to speech (TTS)
@@ -43,7 +43,8 @@ The image contains the default STT and TTS models. Mount a folder only to use ot
 | `TTS_LANGUAGE` | `english` | PocketTTS language: `english`, `german`, `italian`, `portuguese` or `spanish` |
 | `TTS_LANGUAGES_BCP` | `en` | Language code that Home Assistant shows, for example `de` |
 | `TTS_VOICE_ID` | `alba` | Voice embedding in `TTS_DIR/embeddings/` |
-| `TTS_THREADS` | `2` | CPU threads of audio.cpp |
+| `TTS_BACKEND` | `auto` | `vulkan`, `cpu` or `auto`. `auto` uses Vulkan if the server finds a Vulkan GPU at start, else the CPU. |
+| `TTS_THREADS` | empty | CPU threads of audio.cpp. Empty: 2 on a GPU, the number of CPUs (at most 8) on the CPU. |
 | `VK_DEVICE` | `0` | Vulkan device index for TTS |
 
 ## Conversation agent (LLM)

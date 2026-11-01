@@ -1,0 +1,33 @@
+# Turns the TV off in an order that keeps it off.
+#
+# Problem: a receiver with HDMI pass-through (or the TV box itself) wakes the
+# TV again over HDMI-CEC while an app still plays. Fix: send the box to the
+# home screen first, then put the TV into standby. The box stays awake. On
+# some boxes, sleep causes more problems than it solves.
+#
+# The CEC standby command works on Amlogic boxes with a root ADB shell. On
+# other setups, use the TV integration (media_player.turn_off) instead.
+alias: TV off
+description: Turns off the TV and the receiver. Not a tool for the LLM.
+mode: restart
+variables:
+  box: media_player.tv_box
+  receiver: media_player.receiver
+sequence:
+  - alias: Box to the home screen, so no app wakes the TV
+    action: androidtv.adb_command
+    data:
+      entity_id: "{{ box }}"
+      command: input keyevent KEYCODE_HOME
+    continue_on_error: true
+  - delay: "00:00:03"
+  - alias: TV standby over HDMI-CEC (broadcast to the TV, logical address 0)
+    action: androidtv.adb_command
+    data:
+      entity_id: "{{ box }}"
+      command: echo 40 36 > /sys/class/cec/cmd
+    continue_on_error: true
+  - action: media_player.turn_off
+    target:
+      entity_id: "{{ receiver }}"
+    continue_on_error: true

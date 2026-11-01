@@ -1,0 +1,21 @@
+# "play <something> on the TV": hand the whole sentence to the LLM agent,
+# which calls the tool play_youtube. Without this trigger, the built-in intent
+# HassMediaSearchAndPlay can catch "play ..." first and play music instead.
+# Replace conversation.local_agent with your agent entity.
+alias: "Voice: play a video"
+description: Sentences about a TV, YouTube or a video go to the LLM agent, which calls play_youtube.
+mode: parallel
+triggers:
+  - trigger: conversation
+    command:
+      - (play | put on | start) {query} on [the] (tv | television | youtube)
+      - (play | put on | start) [the] [newest | latest] (video | videos) [from | of | by] {query}
+      - watch {query}
+actions:
+  - action: conversation.process
+    data:
+      agent_id: conversation.local_agent
+      language: en
+      text: "{{ trigger.sentence }}"
+    response_variable: agent
+  - set_conversation_response: "{{ agent.response.speech.plain.speech }}"

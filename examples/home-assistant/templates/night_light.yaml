@@ -1,0 +1,16 @@
+# Template binary sensor: on at night, from 23:00 until sunrise. The night
+# never ends before 06:00 and never after 08:00, so a late winter sunrise
+# does not keep the night light on until 08:30.
+# Put it under "template:" in configuration.yaml, or create a template
+# helper (Settings > Helpers > Template > Binary sensor) with the state template.
+- binary_sensor:
+    - name: Night light
+      unique_id: night_light
+      state: >-
+        {%- set t = now() -%}
+        {%- set six = t.replace(hour=6, minute=0, second=0, microsecond=0) -%}
+        {%- set eight = t.replace(hour=8, minute=0, second=0, microsecond=0) -%}
+        {%- set rise = as_local(as_datetime(state_attr('sun.sun', 'next_rising'))) -%}
+        {%- set end = rise if rise.date() == t.date() else six -%}
+        {%- set end = [[end, six] | max, eight] | min -%}
+        {{ t.hour >= 23 or t < end }}
