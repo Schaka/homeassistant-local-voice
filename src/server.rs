@@ -12,7 +12,7 @@
 //! | `POST /mcp` | MCP tools for the conversation agent |
 //! | `GET /web/search?q=` | Web search as JSON |
 //! | `GET /youtube/search?q=` | One YouTube video to play, as JSON |
-//! | `GET /jellyfin/search?q=&user=` | One Jellyfin episode or movie to play, as JSON |
+//! | `GET /jellyfin/search?q=&devices=&user=` | One Jellyfin episode or movie to play, as JSON |
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -219,7 +219,14 @@ async fn jellyfin_search(State(app): State<Shared>, Query(q): Query<HashMap<Stri
     let Some(query) = q.get("q").map(|s| s.trim()).filter(|s| !s.is_empty()) else {
         return json_error(StatusCode::BAD_REQUEST, "missing_q", "the parameter q is missing");
     };
-    match jf.search(query, q.get("user").map(String::as_str)).await {
+    match jf
+        .search(
+            query,
+            q.get("user").map(String::as_str),
+            q.get("devices").map(String::as_str),
+        )
+        .await
+    {
         Ok(Some(pick)) => {
             tracing::info!(
                 "jellyfin {query:?} -> {:?} {} S{:?}E{:?} at {} s",

@@ -92,7 +92,7 @@ Both `JELLYFIN_URL` and `JELLYFIN_API_KEY` turn on `/jellyfin/search`. [search.m
 |---|---|---|
 | `JELLYFIN_URL` | empty | Address of the Jellyfin server, for example `http://jellyfin.local:8096` |
 | `JELLYFIN_API_KEY` | empty | API key from Jellyfin (Dashboard > API Keys) |
-| `JELLYFIN_USER` | empty, required with the two above | The Jellyfin user whose next episode and resume position count, normally the user that is signed in on the TV box. A request can name another user with `&user=`. |
+| `JELLYFIN_USER` | empty, required with the two above | The default user for the next episode and the resume position. A user with an open session on the TV box (`&devices=`) or `&user=` in the request wins ([search.md](search.md#jellyfin-search)). |
 
 ## Removed variables
 

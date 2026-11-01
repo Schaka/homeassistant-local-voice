@@ -255,9 +255,29 @@ impl Jellyfin {
         Ok(list.items.into_iter().next())
     }
 
-    /// The item to play for a spoken query. `user` overrides `JELLYFIN_USER`.
-    pub async fn search(&self, query: &str, user: Option<&str>) -> Result<Option<Pick>> {
-        let user = user.filter(|u| !u.is_empty()).unwrap_or(&self.cfg.user).to_owned();
+    /// The user of a Jellyfin session on one of `devices` (device names,
+    /// comma-separated), active in the last 15 min. A session that plays
+    /// something wins over an idle one.
+    async fn session_user(&self, devices: &str) -> Result<Option<String>> {
+        let sessions: Vec<Value> = self.get("/Sessions", &[("activeWithinSeconds", "900")]).await?;
+        Ok(session_user_of(&sessions, devices))
+    }
+
+    /// The item to play for a spoken query. The user: `user` if given, else
+    /// the user of an open session on one of `devices`, else `JELLYFIN_USER`.
+    pub async fn search(&self, query: &str, user: Option<&str>, devices: Option<&str>) -> Result<Option<Pick>> {
+        let from_session = match (user.filter(|u| !u.is_empty()), devices.filter(|d| !d.is_empty())) {
+            (None, Some(devices)) => self.session_user(devices).await.unwrap_or_else(|err| {
+                tracing::warn!("jellyfin sessions: {err:#}");
+                None
+            }),
+            _ => None,
+        };
+        let user = user
+            .filter(|u| !u.is_empty())
+            .map(str::to_owned)
+            .or(from_session)
+            .unwrap_or_else(|| self.cfg.user.clone());
         let user_id = self.user_id(&user).await?;
         let info: Value = self.get("/System/Info/Public", &[]).await?;
         let server_id = info["Id"].as_str().unwrap_or_default().to_owned();
@@ -304,6 +324,26 @@ impl Jellyfin {
         };
         Ok(chosen.map(|e| pick(Some(&e), &e)))
     }
+}
+
+/// See `Jellyfin::session_user`. Sessions come newest first from Jellyfin.
+pub fn session_user_of(sessions: &[Value], devices: &str) -> Option<String> {
+    let wanted: Vec<String> = devices.split(',').map(|d| d.trim().to_lowercase()).collect();
+    let on_device: Vec<&Value> = sessions
+        .iter()
+        .filter(|s| {
+            s["DeviceName"]
+                .as_str()
+                .is_some_and(|d| wanted.contains(&d.to_lowercase()))
+                && s["UserName"].is_string()
+        })
+        .collect();
+    on_device
+        .iter()
+        .find(|s| s["NowPlayingItem"].is_object())
+        .or(on_device.first())
+        .and_then(|s| s["UserName"].as_str())
+        .map(str::to_owned)
 }
 
 #[cfg(test)]
@@ -357,6 +397,23 @@ mod tests {
     }
 
     #[test]
+    fn user_of_the_open_session() {
+        let sessions = serde_json::json!([
+            {"DeviceName": "Firefox", "UserName": "Schaka", "NowPlayingItem": {"Name": "x"}},
+            {"DeviceName": "UGOOS-AM6", "UserName": "Schaka"},
+            {"DeviceName": "UGOOS-AM6", "UserName": "Holly", "NowPlayingItem": {"Name": "y"}},
+            {"DeviceName": "Nokia Streaming Box 8010", "UserName": "Holly"},
+        ]);
+        let s = sessions.as_array().unwrap();
+        assert_eq!(
+            session_user_of(s, "ugoos-am6, Kodi (CoreELEC)").as_deref(),
+            Some("Holly")
+        );
+        assert_eq!(session_user_of(s, "Nokia Streaming Box 8010").as_deref(), Some("Holly"));
+        assert_eq!(session_user_of(s, "SHIELD"), None);
+    }
+
+    #[test]
     fn season_and_episode() {
         assert_eq!(
             split_episode("Spy x Family season 2 episode 3"),
@@ -379,7 +436,8 @@ mod tests {
         })
         .unwrap();
         for q in env("JELLYFIN_TEST_QUERY").split(';') {
-            println!("{q:?} -> {:?}", jf.search(q, None).await.unwrap());
+            let devices = std::env::var("JELLYFIN_TEST_DEVICES").ok();
+            println!("{q:?} -> {:?}", jf.search(q, None, devices.as_deref()).await.unwrap());
         }
     }
 }

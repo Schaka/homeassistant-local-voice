@@ -40,6 +40,7 @@ sequence:
     data:
       query: >-
         {{ query | trim }}{{ ' season ' ~ (season | int) if season is defined and season not in ['', none] else '' }}{{ ' episode ' ~ (episode | int) if episode is defined and episode not in ['', none] else '' }}
+      devices: TV-BOX-NAME
     response_variable: r
     continue_on_error: true
   - variables:

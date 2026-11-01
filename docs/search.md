@@ -54,7 +54,7 @@ If nothing fits, the answer is 404 (`no_result`). If YouTube fails, the answer i
 
 ## Jellyfin search
 
-`GET /jellyfin/search?q=<query>[&user=<name>]` returns one episode or movie of your Jellyfin library to play:
+`GET /jellyfin/search?q=<query>[&devices=<names>][&user=<name>]` returns one episode or movie of your Jellyfin library to play:
 
 ```json
 {"kind": "episode", "query": "spy family", "item_id": "<32 hex>",
@@ -67,6 +67,12 @@ If nothing fits, the answer is 404 (`no_result`). If YouTube fails, the answer i
 | A series, for example "spy family" | The next episode of the user ("next up"), with the resume position. If the user watched everything, the first episode. | `episode` |
 | A series with "season 2 episode 3" | That episode | `episode` |
 | A movie, for example "dune part two" | The movie. Of a film series ("lord of the rings"), the oldest movie that the user did not watch. | `movie` |
+
+The user decides the next episode and the resume position. The server takes the first that applies:
+
+1. `user`, if the request names one.
+2. The user of a Jellyfin session on one of `devices` (Jellyfin device names, comma-separated, for example `UGOOS-AM6,Kodi (CoreELEC)`), active in the last 15 minutes. A session that plays something wins. So the person who has Jellyfin open on the TV box continues their own series.
+3. `JELLYFIN_USER`.
 
 Jellyfin's own search needs the title words in order, so it does not find "Spy x Family" for "spy family". The server keeps the list of all series and movie titles (refreshed every 10 minutes, about 1 s for 900 titles) and matches the spoken words against it:
 

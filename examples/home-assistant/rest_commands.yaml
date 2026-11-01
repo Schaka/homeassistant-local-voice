@@ -5,7 +5,9 @@ assistant_hub_youtube_search:
   method: get
   timeout: 20
 assistant_hub_jellyfin_search:
-  url: http://<host>:10300/jellyfin/search?q={{ query | urlencode }}
+  # devices: the Jellyfin device names of the TV box. The user with an open
+  # session there wins over JELLYFIN_USER.
+  url: http://<host>:10300/jellyfin/search?q={{ query | urlencode }}&devices={{ devices | default('') | urlencode }}
   method: get
   timeout: 20
 assistant_hub_web_search:
