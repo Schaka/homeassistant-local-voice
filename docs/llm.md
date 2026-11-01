@@ -135,7 +135,7 @@ After the first request, llama-server keeps the processed prompt in its cache. H
 A restart empties this cache. With `LLM_SLOT_CACHE=on` (the default), `assistant-hub` saves the KV cache of the last Assist conversation to `/models/llm/slots`:
 
 1. If the cache changed, it saves it every 5 minutes. It also saves it at each container stop.
-2. When llama-server starts, it restores the file.
+2. When llama-server starts, it restores the file once. A slow health check under full CPU load is no restart, and a restore never runs during a request. Before this rule, the cache was restored after almost every request, so each request prefilled the full prompt again.
 3. For 6,200 tokens of Ling-3.0-tiny, the file is 124 MB. A save or a restore takes 0.3 s or less (13 ms and 25 ms for 3,450 tokens in a test).
 
 The first request after a restart then takes about 0.5 s instead of more than 60 s. `/models/llm` must be writable. The cache is empty again after each change of the prompt, of the exposed entities or of the tools.
