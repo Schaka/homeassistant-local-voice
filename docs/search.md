@@ -46,7 +46,7 @@ It uses InnerTube, the API behind the YouTube website. It needs no key. It only 
 
 | Query | Pick | `kind` |
 |---|---|---|
-| The name or handle of a channel, for example "Linus Tech Tips" or "mkbhd" | The newest long video of the channel. Its uploads playlist `UULF...` has no Shorts. | `channel_latest` |
+| The name or handle of a channel, for example "Linus Tech Tips" or "mkbhd". Spoken numbers ("level one techs") and abbreviations with the same first letter and at least 70 % of the letters in order ("lvl1techs") also count. | The newest long video of the channel. Its uploads playlist `UULF...` has no Shorts. | `channel_latest` |
 | A genre or mood: it starts with "some" or "any", or it ends with "music", "mix", "radio", "playlist" or "beats" | The first livestream or video of at least 20 minutes | `live` or `mix` |
 | Anything else | The first video that is no Short and no upcoming premiere | `video` or `live` |
 
