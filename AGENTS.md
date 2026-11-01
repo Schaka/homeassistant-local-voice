@@ -43,6 +43,23 @@ CI runs the first three, a release build and `cargo deny check all`. All must pa
 8. Write documentation in plain English: short sentences, active voice, no semicolons, no em-dashes.
 9. The target hardware includes 10-year-old office PCs ([docs/hardware.md](docs/hardware.md)). Do not add work to the request path that a 4th-generation Core i5 cannot do fast.
 
+### Skills
+
+`.claude/skills/` has step-by-step procedures. Claude Code loads them by itself. Other agents read them as documents.
+
+| Skill | Use it to |
+|---|---|
+| `add-hub-feature` | Add a route, an MCP tool, a search, a background service or a native engine |
+| `bump-native-engine` | Update llama.cpp, parakeet.cpp, audio.cpp, SearXNG, Rust or cargo-chef |
+
+### Lessons that cost time before
+
+1. Measure on real data before you trust a design. The media index first ranked episodes and series together, and a "Planet Earth" episode beat "Dune" for "desert planet with sand worms". Only the evaluation on a real library showed it.
+2. A threshold needs negatives in its test set: queries that must find nothing. Without them, every gate looks good.
+3. Native libraries with their own ggml must load with `RTLD_LOCAL`, and only one backend each. `assistant-hub` asks `llama-server --list-devices` for GPUs, because Mesa's software driver is no device for ggml.
+4. Background work that uses the CPU runs on its own thread at nice 10, never on the tokio blocking pool.
+5. Local builds link the Python that PyO3 finds. If that is not the system Python, set `LD_LIBRARY_PATH` to its `lib` folder to run `target/debug/assistant-hub`.
+
 ## Set up a home
 
 The goal: speech, the agent and useful tools work in the user's Home Assistant. [docs/home-assistant.md](docs/home-assistant.md) is the same procedure for people.
