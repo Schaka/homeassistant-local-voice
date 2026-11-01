@@ -12,6 +12,8 @@ use anyhow::{Context, Result, bail};
 #[derive(Debug, Clone)]
 pub struct Config {
     pub listen: SocketAddr,
+    /// llama-server binary. It also lists the Vulkan GPUs at start (gpu.rs).
+    pub llama_server: PathBuf,
     pub stt: SttConfig,
     pub tts: TtsConfig,
     pub llm: Option<LlmConfig>,
@@ -24,8 +26,36 @@ pub struct SttConfig {
     pub lib: PathBuf,
     pub model: PathBuf,
     pub model_name: String,
-    pub device: String,
+    /// `PARAKEET_DEVICE`. None: the first Vulkan GPU, or the CPU without one.
+    pub device: Option<String>,
     pub debug_dir: Option<PathBuf>,
+}
+
+/// Where TTS runs. `Auto` picks Vulkan when a Vulkan GPU exists, else the CPU.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TtsBackend {
+    Auto,
+    Vulkan,
+    Cpu,
+}
+
+impl TtsBackend {
+    pub fn parse(value: &str) -> Result<Self> {
+        Ok(match value {
+            "auto" => Self::Auto,
+            "vulkan" => Self::Vulkan,
+            "cpu" => Self::Cpu,
+            other => bail!("unknown TTS_BACKEND={other} (expected auto, vulkan or cpu)"),
+        })
+    }
+
+    /// The value for the audiocpp_server configuration. `Auto` must be resolved first.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Vulkan | Self::Auto => "vulkan",
+            Self::Cpu => "cpu",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -37,8 +67,10 @@ pub struct TtsConfig {
     pub language: String,
     pub voice_id: String,
     pub languages_bcp: Vec<String>,
+    pub backend: TtsBackend,
     pub vk_device: u32,
-    pub threads: u32,
+    /// `TTS_THREADS`. None: 2 on a GPU, up to 8 on the CPU.
+    pub threads: Option<u32>,
     pub internal_port: u16,
 }
 
@@ -225,7 +257,7 @@ impl Config {
             model: PathBuf::from(var_or("STT_DIR", "/models/stt"))
                 .join(var_or("STT_MODEL_FILENAME", "parakeet-ctc-0.6b-q8_0.gguf")),
             model_name: var_or("STT_MODEL_NAME", "parakeet-ctc-0.6b"),
-            device: var_or("PARAKEET_DEVICE", "Vulkan0"),
+            device: var("PARAKEET_DEVICE"),
             debug_dir: var("STT_DEBUG_DIR").map(PathBuf::from),
         };
 
@@ -241,8 +273,11 @@ impl Config {
                 .map(|l| l.trim().to_owned())
                 .filter(|l| !l.is_empty())
                 .collect(),
+            backend: TtsBackend::parse(&var_or("TTS_BACKEND", "auto"))?,
             vk_device: parse_num("VK_DEVICE", 0)?,
-            threads: parse_num("TTS_THREADS", 2)?,
+            threads: var("TTS_THREADS")
+                .map(|v| v.parse().map_err(|e| anyhow::anyhow!("invalid TTS_THREADS={v}: {e}")))
+                .transpose()?,
             internal_port: 8100,
         };
 
@@ -255,6 +290,7 @@ impl Config {
 
         Ok(Self {
             listen,
+            llama_server: PathBuf::from(var_or("LLAMA_SERVER", "/opt/llama.cpp/llama-server")),
             stt,
             tts,
             llm: Self::llm_from_env()?,

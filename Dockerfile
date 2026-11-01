@@ -5,13 +5,15 @@
 # (llama-server) under /llm, MCP tools on /mcp, web search (SearXNG, embedded
 # as a Python library) and YouTube search.
 #
-# The image ships its own Mesa Vulkan drivers (RADV, ANV, llvmpipe). Only the
-# GPU device node is passed through at runtime.
+# The image ships its own Mesa Vulkan drivers (RADV, ANV). Only the GPU device
+# node is passed through at runtime. Without a GPU, STT and TTS run on the
+# CPU backend of ggml (the server picks it at start).
 #
 # `docker buildx bake final` reproduces exactly what CI publishes (see
 # docker-bake.hcl and .github/workflows/image.yml).
 
 ARG RUST_VERSION=1.99.1
+ARG CARGO_CHEF_VERSION=0.1.78
 ARG DEBIAN_VERSION=trixie
 
 # ============================================================================
@@ -103,7 +105,7 @@ RUN git clone -q --filter=blob:none https://github.com/searxng/searxng.git /opt/
 # assistant-hub (Rust). cargo-chef builds the dependencies in their own layer,
 # so a code change rebuilds only the crate itself.
 # ============================================================================
-FROM lukemathwalker/cargo-chef:latest-rust-${RUST_VERSION}-slim-${DEBIAN_VERSION} AS chef
+FROM lukemathwalker/cargo-chef:${CARGO_CHEF_VERSION}-rust-${RUST_VERSION}-slim-${DEBIAN_VERSION} AS chef
 WORKDIR /src
 
 FROM chef AS planner

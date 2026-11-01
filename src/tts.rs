@@ -82,9 +82,9 @@ pub fn child_spec(cfg: &TtsConfig) -> Result<ChildSpec> {
     let config = json!({
         "host": "127.0.0.1",
         "port": cfg.internal_port,
-        "backend": "vulkan",
+        "backend": cfg.backend.name(),
         "device": cfg.vk_device,
-        "threads": cfg.threads,
+        "threads": cfg.threads.unwrap_or(2),
         "lazy_load": true,
         "models": [{
             "id": cfg.model_id,

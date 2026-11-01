@@ -117,7 +117,8 @@ fn main() -> ExitCode {
 
 fn serve() -> Result<()> {
     init_logging();
-    let cfg = Config::from_env()?;
+    let mut cfg = Config::from_env()?;
+    choose_speech_devices(&mut cfg);
 
     // Reject a truncated model before it reaches a native loader.
     let mut models = vec![cfg.stt.model.clone(), cfg.tts.dir.join(&cfg.tts.model_filename)];
@@ -132,7 +133,7 @@ fn serve() -> Result<()> {
 
     // Environment for the native libraries. Set here, before the runtime
     // starts any thread, because changing the environment is not thread-safe.
-    let mut env_vars = vec![("PARAKEET_DEVICE", cfg.stt.device.clone())];
+    let mut env_vars = vec![("PARAKEET_DEVICE", cfg.stt.device.clone().unwrap_or_default())];
     if let Some(search) = &cfg.search {
         env_vars.push(search::prepare(search)?);
     }
@@ -146,6 +147,44 @@ fn serve() -> Result<()> {
         anyhow::bail!("GPU lost, exiting so that the container restarts");
     }
     Ok(())
+}
+
+/// Picks the devices for STT and TTS. Settings that the user made stay as
+/// they are. Without a Vulkan GPU, both run on the CPU: llvmpipe is no option,
+/// because ggml does not use it, and audio.cpp fails on a missing Vulkan device.
+fn choose_speech_devices(cfg: &mut Config) {
+    let gpus = gpu::vulkan_devices(&cfg.llama_server);
+    let on_gpu = !gpus.is_empty();
+    if on_gpu {
+        tracing::info!("Vulkan GPUs: {}", gpus.join(", "));
+    } else {
+        tracing::info!("no Vulkan GPU found, STT and TTS run on the CPU");
+    }
+    if cfg.stt.device.is_none() {
+        cfg.stt.device = Some(if on_gpu { gpus[0].clone() } else { "cpu".to_owned() });
+    }
+    if cfg.tts.backend == config::TtsBackend::Auto {
+        cfg.tts.backend = if on_gpu {
+            config::TtsBackend::Vulkan
+        } else {
+            config::TtsBackend::Cpu
+        };
+    }
+    if cfg.tts.threads.is_none() {
+        let cores = std::thread::available_parallelism().map_or(2, |n| n.get());
+        let threads = if cfg.tts.backend == config::TtsBackend::Cpu {
+            cores.min(8)
+        } else {
+            2
+        };
+        cfg.tts.threads = Some(u32::try_from(threads).unwrap_or(2));
+    }
+    tracing::info!(
+        "STT device {}, TTS backend {} with {} threads",
+        cfg.stt.device.as_deref().unwrap_or(""),
+        cfg.tts.backend.name(),
+        cfg.tts.threads.unwrap_or(2)
+    );
 }
 
 /// Runs until SIGTERM or SIGINT. Returns true if it stopped because the GPU

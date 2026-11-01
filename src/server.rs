@@ -68,9 +68,12 @@ async fn health(State(app): State<Shared>) -> Response {
         None => "off",
         Some(_) => "on",
     };
+    let stt = app.voice.stt.is_some();
+    // 200 in both cases: the container stays up, and the supervisor restarts
+    // a dead TTS engine. "degraded" tells a person where to look.
     axum::Json(json!({
-        "status": "ok",
-        "stt": app.voice.stt.is_some(),
+        "status": if stt && tts { "ok" } else { "degraded" },
+        "stt": stt,
         "tts": tts,
         "llm": llm,
         "web_search": app.web_search.is_some(),

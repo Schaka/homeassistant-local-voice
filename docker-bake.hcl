@@ -1,8 +1,7 @@
 # Build graph for the assistant-hub image. One target (`final`), one
-# Dockerfile. Bake exists so every version-shaped knob -- registry, tags,
-# cache refs, and the model build args -- lives here, and CI (and local
-# `docker buildx bake`) just hands variables over, same pattern as the
-# rocm-migraphx-ort-builder pipeline.
+# Dockerfile. Every pinned version, the registry, the tags, the cache refs and
+# the model build args live here. CI and a local `docker buildx bake` only
+# hand variables over, so both build the same image.
 #
 # Local use:
 #   docker buildx bake final                          # build, default models
@@ -53,9 +52,9 @@ variable "DATE" { default = "" }
 variable "RELEASE_TAG" { default = "" }
 
 # ---------------------------------------------------------------------------
-# Model build args -- the "bigger models" lever. Defaults are the 2 GB-GPU
-# friendly set verified on an R7 250. Override to bake any other gguf /
-# embedding from the same repos (README: "Using bigger models").
+# Model build args: the "other models" lever. The defaults fit a 2 GB GPU
+# (verified on an R7 250) and run on a CPU too. Override them to bake any
+# other gguf or voice embedding from the same repos (docs/voice.md).
 # ---------------------------------------------------------------------------
 
 variable "STT_MODEL_URL" { default = "https://huggingface.co/mudler/parakeet-cpp-gguf/resolve/main/ctc-0.6b-q8_0.gguf" }
@@ -71,7 +70,7 @@ variable "STT_MODEL_NAME" { default = "parakeet-ctc-0.6b" }
 
 # Optional conversation agent. llama.cpp is a pinned prebuilt Vulkan release
 # (bump on purpose, like parakeet.cpp v0.5.0). No LLM model is baked by
-# default -- mount one under /models/llm (README: "Local conversation agent").
+# default. Mount one under /models/llm or set LLM_HF_REPO (docs/llm.md).
 variable "LLAMACPP_BUILD" { default = "b11966" }
 # Pinned sources. Bump on purpose, then test the image.
 variable "AUDIOCPP_COMMIT" { default = "bd02977fc1fd7a03087f271b2d62cd2ea1bfc0aa" }
@@ -79,6 +78,8 @@ variable "PARAKEET_VERSION" { default = "v0.5.0" }
 variable "SEARXNG_COMMIT" { default = "ff8f5ddcc9f2c58d8b0276ec030f6a3adfa17525" }
 # Keep in sync with rust-toolchain.toml.
 variable "RUST_VERSION" { default = "1.99.1" }
+# cargo-chef image tag: <CARGO_CHEF_VERSION>-rust-<RUST_VERSION>-slim-trixie.
+variable "CARGO_CHEF_VERSION" { default = "0.1.78" }
 variable "LLM_MODEL_URL" { default = "" }
 variable "LLM_MODEL_FILENAME" { default = "" }
 variable "LLM_FAMILY" { default = "" }
@@ -111,6 +112,7 @@ target "final" {
     PARAKEET_VERSION   = "${PARAKEET_VERSION}"
     SEARXNG_COMMIT     = "${SEARXNG_COMMIT}"
     RUST_VERSION       = "${RUST_VERSION}"
+    CARGO_CHEF_VERSION = "${CARGO_CHEF_VERSION}"
     LLM_MODEL_URL      = "${LLM_MODEL_URL}"
     LLM_MODEL_FILENAME = "${LLM_MODEL_FILENAME}"
     LLM_FAMILY         = "${LLM_FAMILY}"

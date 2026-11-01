@@ -46,9 +46,8 @@ jobs:
     timeout-minutes: 240
     permissions:
       contents: read
+      # Push the image, the cache and the provenance and SBOM attestations.
       packages: write
-      id-token: write
-      attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

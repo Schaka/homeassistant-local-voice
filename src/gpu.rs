@@ -64,9 +64,48 @@ impl Gpu {
     }
 }
 
+/// Names of the Vulkan GPUs (`Vulkan0`, ...) that ggml finds. Blocking.
+///
+/// It asks `llama-server --list-devices`, which uses the same ggml Vulkan
+/// backend as parakeet.cpp and audio.cpp. Mesa's CPU driver (llvmpipe) is not
+/// in the list, because ggml skips CPU devices. An empty list means: run STT
+/// and TTS on the CPU.
+pub fn vulkan_devices(llama_server: &std::path::Path) -> Vec<String> {
+    match std::process::Command::new(llama_server)
+        .arg("--list-devices")
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+    {
+        Ok(out) => parse_device_list(&String::from_utf8_lossy(&out.stdout)),
+        Err(err) => {
+            tracing::warn!("cannot list GPUs with {}: {err}", llama_server.display());
+            Vec::new()
+        }
+    }
+}
+
+/// Parses lines like `  Vulkan0: Intel(R) UHD Graphics 730 (15955 MiB, 11874 MiB free)`.
+pub fn parse_device_list(output: &str) -> Vec<String> {
+    output
+        .lines()
+        .filter_map(|line| line.trim().split_once(':'))
+        .map(|(name, _)| name.trim())
+        .filter(|name| name.starts_with("Vulkan") && name[6..].chars().all(|c| c.is_ascii_digit()))
+        .map(str::to_owned)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn device_list() {
+        let gpu = "Available devices:\n  Vulkan0: Intel(R) UHD Graphics 730 (ADL-S GT1) (15955 MiB, 11874 MiB free)\n";
+        assert_eq!(parse_device_list(gpu), ["Vulkan0"]);
+        assert!(parse_device_list("Available devices:\n  (none)\n").is_empty());
+    }
 
     #[test]
     fn three_gpu_faults_trigger_a_restart() {
