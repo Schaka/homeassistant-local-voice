@@ -1,13 +1,10 @@
 #!/usr/bin/env bash
-# Build the self-contained Wyoming voice image. Nothing host-specific is
-# needed up front -- the image builds its own Mesa Vulkan drivers and
-# downloads its own models (see the Dockerfile ARGs to swap models).
+# Build the image locally, the same way CI does (docker-bake.hcl).
 set -eu
 cd "$(dirname "$0")/.."
 
-podman build -t wyoming-voice -f Dockerfile .
+docker buildx bake final --set final.tags=localhost/assistant-hub:latest --load
 
 echo
-echo "Built: localhost/wyoming-voice:latest"
-echo "Deploy with: ./scripts/run.sh"
-echo "Swap models: see README 'Using bigger models' (build ARGs or env overrides)."
+echo "Built: localhost/assistant-hub:latest"
+echo "Run it with: ./scripts/run.sh"

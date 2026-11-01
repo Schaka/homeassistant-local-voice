@@ -1,5 +1,7 @@
 # Wyoming STT+TTS on an R7 250 2GB (Oland) via Vulkan
 
+These notes describe the old image (Ubuntu 26.04, Python, `entrypoint.sh`, until 2026-11-01). The GPU findings still apply. The process layout changed: one Rust server (`assistant-hub`) on one port, on Debian 13. [architecture.md](architecture.md) describes the current layout.
+
 Everything learned the hard way getting a 10-15 € e-waste GPU to run a
 Home Assistant voice assistant. Now self-contained and released as one image:
 one container, one Wyoming server on one port (10300), advertising both ASR

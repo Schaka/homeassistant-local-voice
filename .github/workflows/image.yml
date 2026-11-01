@@ -1,0 +1,96 @@
+name: Image
+
+# Publishes the image to ghcr.io after the checks in ci.yml pass:
+#   - push to main        -> :latest + :<date>
+#   - push a tag v*       -> also :vX.Y.Z
+#   - manual dispatch     -> pick a release tag and/or override the model URLs
+#
+# docker-bake.hcl decides tags, cache refs and build args. This workflow only
+# hands variables over, so `docker buildx bake final` locally reproduces CI.
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Stable tag to publish (e.g. "v1.0.0"). Empty = latest + dated only.'
+        required: false
+        default: ''
+      stt_model_url:
+        description: 'STT gguf URL override'
+        required: false
+        default: ''
+      tts_model_url:
+        description: 'TTS gguf URL override'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: image-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The audio.cpp stage compiles from source; hosted runners have little disk.
+      - uses: jlumbroso/free-disk-space@ceedf095f4ec1a097402bc6bd80831f2e1a6fde6 # v2.0.0
+        with:
+          tool-cache: true
+          docker-images: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        env:
+          OWNER: ${{ github.repository_owner }}
+          REGISTRY_CACHE: 'true'
+          CACHE_TARGET: 'final'
+          RELEASE_TAG_IN: ${{ inputs.release_tag }}
+          REF_NAME: ${{ github.ref_name }}
+          STT_MODEL_URL_IN: ${{ inputs.stt_model_url }}
+          TTS_MODEL_URL_IN: ${{ inputs.tts_model_url }}
+        run: |
+          set -euo pipefail
+          export OWNER="${OWNER,,}"      # ghcr package paths are lowercase
+          export DATE
+          DATE="$(date -u +%Y%m%d)"
+          # Stable tag: manual input first, else a git tag v* push. A branch
+          # push must not publish a :main tag.
+          if [ -n "$RELEASE_TAG_IN" ]; then
+            export RELEASE_TAG="$RELEASE_TAG_IN"
+          elif [[ "$REF_NAME" == v* ]]; then
+            export RELEASE_TAG="$REF_NAME"
+          fi
+          if [ -n "$STT_MODEL_URL_IN" ]; then export STT_MODEL_URL="$STT_MODEL_URL_IN"; fi
+          if [ -n "$TTS_MODEL_URL_IN" ]; then export TTS_MODEL_URL="$TTS_MODEL_URL_IN"; fi
+          # The resolved graph first, so a failed build has it right above.
+          docker buildx bake --print final
+          docker buildx bake --push --provenance=mode=max --sbom=true final

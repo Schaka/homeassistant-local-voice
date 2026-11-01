@@ -1,14 +1,18 @@
 # Configuration reference
 
-You configure the container with environment variables. Each variable has a default, so the container starts without any of them. `entrypoint.sh` reads them at each start.
+You configure the container with environment variables. Each variable has a default, so the container starts without any of them. `assistant-hub` reads them at each start (`src/config.rs`).
 
 ## Ports
 
-| Port | Service | Starts |
+The server has one port for everything. [architecture.md](architecture.md) lists the routes.
+
+| Variable | Default | Purpose |
 |---|---|---|
-| 10300 | Wyoming server: STT and TTS | Always |
-| 8080 | llama-server, OpenAI-compatible API `/v1` | When `LLM_HF_REPO` or `LLM_MODEL_FILENAME` is set |
-| 8090 | Web search MCP endpoint `/mcp` | When `SEARCH_ENABLED=on` |
+| `PORT` | `10300` | The only port: Wyoming (STT, TTS) and HTTP (`/llm/v1`, `/mcp`, `/web/search`, `/youtube/search`, `/health`) |
+| `BIND_ADDRESS` | `0.0.0.0` | Address to listen on |
+| `RUST_LOG` | `info` | Log level, for example `debug` or `info,assistant_hub=debug` |
+
+The old ports 8080 (llama-server) and 8090 (MCP) are gone. Home Assistant connects to `http://<host>:10300/llm/v1` and `http://<host>:10300/mcp`.
 
 ## Volumes
 
@@ -57,20 +61,34 @@ Set `LLM_HF_REPO` or `LLM_MODEL_FILENAME`, not both. With neither, llama-server 
 | `LLM_CTX` | `64k` | Context size: `32k`, `64k`, `128k` or `256k`. `256k` is only for `ling3` (YaRN rope scaling) and `lfm3`. |
 | `LLM_REASONING` | `on` | Thinking mode: `on` or `off` |
 | `LLM_REASONING_BUDGET` | `512` | Maximum thinking tokens per reply. `-1` removes the limit. |
-| `LLM_API_KEY` | empty | Empty accepts any key. With a value, the server accepts only that key. |
+| `LLM_API_KEY` | empty | Empty accepts any key. With a value, `/llm/...` accepts only `Authorization: Bearer <key>`. llama-server itself listens on 127.0.0.1 without a key. |
 | `LLM_EXTRA_ARGS` | empty | More llama-server arguments, for example `--n-cpu-moe 8`. They come last and override the defaults. On a GPU (`LLM_DEVICE=Vulkan0`), set `-fa off` (flash attention off). This is a strong recommendation: with flash attention on, an Intel iGPU prefilled Ling-3.0-tiny 3.7 times slower (79 against 294 tokens/s). For Granite and MiniCPM5, it made no difference. See [igpu-backends.md](igpu-backends.md). |
 | `LLM_SLOT_CACHE` | `on` | Keeps the prompt cache across restarts in `/models/llm/slots`. `off` disables it. |
 | `LLM_TEMPLATE_FIX` | `on` | For `ling3`: use the patched chat template `templates/ling3.jinja`. After a tool result, the turn starts with a closed thinking block, so the answer never ends up as thinking. `off` uses the template from the GGUF. |
-| `LLM_THINKING_GUARD` | `off` | Only for models without a fixed template. With thinking on: if a reply has no text and no tool call (the answer is stuck in the thinking block), `llm_guard.py` asks once more without thinking. `off` disables it. |
 | `HF_TOKEN` | empty | Token for gated Hugging Face repos |
 
 ## Web search
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `SEARCH_ENABLED` | `off` | `on` starts SearXNG and the MCP server |
-| `SEARCH_MCP_PORT` | `8090` | Port of the MCP endpoint `/mcp` |
+| `SEARCH_ENABLED` | `off` | `on` loads SearXNG (in process) and offers the MCP tool `web_search` |
 | `SEARCH_LANGUAGE` | `en` | Language of the results, for example `de`. Empty gives all languages. |
+
+## YouTube search
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `YOUTUBE_ENABLED` | `on` | `off` turns `/youtube/search` off |
+| `YOUTUBE_LANGUAGE` | `en` | Language of titles (`hl`) |
+| `YOUTUBE_REGION` | `DE` | Region of the results (`gl`) |
+| `YOUTUBE_CLIENT_VERSION` | `2.20261030.00.00` | Web client version that the server reports to YouTube |
+
+## Removed variables
+
+| Variable | Why |
+|---|---|
+| `LLM_THINKING_GUARD` | The guard proxy is gone. The patched Ling template solves the empty replies. A set value only logs a warning. |
+| `SEARCH_MCP_PORT` | MCP is `/mcp` on the main port. A set value only logs a warning. |
 
 ## Build arguments
 
@@ -91,6 +109,9 @@ The Dockerfile bakes models and pins versions with these arguments. `docker-bake
 | `LLM_FAMILY` | empty | Default of the variable `LLM_FAMILY` |
 | `LLAMACPP_BUILD` | `b11966` | llama.cpp release that the image contains |
 | `SEARXNG_COMMIT` | `ff8f5ddcc9f2c58d8b0276ec030f6a3adfa17525` | SearXNG commit that the image contains |
+| `AUDIOCPP_COMMIT` | `bd02977fc1fd7a03087f271b2d62cd2ea1bfc0aa` | audio.cpp commit that the image builds |
+| `PARAKEET_VERSION` | `v0.5.0` | parakeet.cpp release that the image contains |
+| `RUST_VERSION` | `1.99.1` | Rust toolchain of the build. Keep it the same as in `rust-toolchain.toml`. |
 
 The full STT and TTS URLs start with `https://huggingface.co/`. The TTS URLs are in the repo `audio-cpp/audio.cpp-gguf`.
 

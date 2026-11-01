@@ -1,13 +1,9 @@
-# Build context: only what the Dockerfile needs. Everything else (CI, docs,
-# host-driver leftovers, staged models) is excluded so context + cache stays
-# small and portable.
-.git
-.github
-docs
-scripts
-models
-vk-libs
-tmp
-*.log
-build
-__pycache__
+# Build context: only what the Dockerfile copies (Cargo files, src, model
+# specs, templates). The toolchain file stays out: the builder image pins the
+# same Rust version, and rustup would otherwise download extra components.
+*
+!Cargo.toml
+!Cargo.lock
+!src/
+!model_specs/
+!templates/

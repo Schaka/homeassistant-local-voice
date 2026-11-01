@@ -1,0 +1,38 @@
+# cargo-deny configuration: `cargo deny check all` in CI.
+
+[graph]
+targets = ["x86_64-unknown-linux-gnu"]
+
+[advisories]
+# RustSec advisories fail the build. Unmaintained crates only warn when we use them directly.
+unmaintained = "workspace"
+
+[licenses]
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Unicode-3.0",
+  "Zlib",
+  "MPL-2.0",
+  "CDLA-Permissive-2.0",
+  "OpenSSL",
+]
+confidence-threshold = 0.9
+# Some allowed licenses may not occur at the moment. That is fine.
+unused-allowed-license = "allow"
+
+[licenses.private]
+# This crate is not published (publish = false) and has no license field.
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

@@ -1,4 +1,4 @@
-# Build graph for the Wyoming voice image. One target (`final`), one
+# Build graph for the assistant-hub image. One target (`final`), one
 # Dockerfile. Bake exists so every version-shaped knob -- registry, tags,
 # cache refs, and the model build args -- lives here, and CI (and local
 # `docker buildx bake`) just hands variables over, same pattern as the
@@ -73,6 +73,12 @@ variable "STT_MODEL_NAME" { default = "parakeet-ctc-0.6b" }
 # (bump on purpose, like parakeet.cpp v0.5.0). No LLM model is baked by
 # default -- mount one under /models/llm (README: "Local conversation agent").
 variable "LLAMACPP_BUILD" { default = "b11966" }
+# Pinned sources. Bump on purpose, then test the image.
+variable "AUDIOCPP_COMMIT" { default = "bd02977fc1fd7a03087f271b2d62cd2ea1bfc0aa" }
+variable "PARAKEET_VERSION" { default = "v0.5.0" }
+variable "SEARXNG_COMMIT" { default = "ff8f5ddcc9f2c58d8b0276ec030f6a3adfa17525" }
+# Keep in sync with rust-toolchain.toml.
+variable "RUST_VERSION" { default = "1.99.1" }
 variable "LLM_MODEL_URL" { default = "" }
 variable "LLM_MODEL_FILENAME" { default = "" }
 variable "LLM_FAMILY" { default = "" }
@@ -101,6 +107,10 @@ target "final" {
     TTS_VOICE_ID       = "${TTS_VOICE_ID}"
     STT_MODEL_NAME     = "${STT_MODEL_NAME}"
     LLAMACPP_BUILD     = "${LLAMACPP_BUILD}"
+    AUDIOCPP_COMMIT    = "${AUDIOCPP_COMMIT}"
+    PARAKEET_VERSION   = "${PARAKEET_VERSION}"
+    SEARXNG_COMMIT     = "${SEARXNG_COMMIT}"
+    RUST_VERSION       = "${RUST_VERSION}"
     LLM_MODEL_URL      = "${LLM_MODEL_URL}"
     LLM_MODEL_FILENAME = "${LLM_MODEL_FILENAME}"
     LLM_FAMILY         = "${LLM_FAMILY}"

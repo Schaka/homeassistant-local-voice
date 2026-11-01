@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Run the Wyoming voice container (STT + TTS on port 10300).
-# Auto-detects the first /dev/dri render node and its group; no host driver
-# install or other host setup is required.
+# Run the assistant-hub container. Everything is on port 10300: Wyoming STT
+# and TTS, the LLM under /llm/v1, MCP tools on /mcp, /web/search and
+# /youtube/search. Detects the first /dev/dri render node and its group.
 set -eu
 cd "$(dirname "$0")/.."
 
@@ -29,21 +29,15 @@ if [ -n "${LLM_MODEL_FILENAME:-}${LLM_HF_REPO:-}" ]; then
     )
 fi
 
-podman run -d --name wyoming-voice \
+docker run -d --name assistant-hub \
   --device "$RENDER_DEV" \
   --group-add "$RENDER_GROUP" \
-  --security-opt seccomp:unconfined \
-  --security-opt label=disable \
-  --ipc host \
   -p 10300:10300 \
-  -p 8080:8080 \
+  -e SEARCH_ENABLED="${SEARCH_ENABLED:-off}" \
   "${LLM_ARGS[@]}" \
   --restart unless-stopped \
-  localhost/wyoming-voice:latest
+  localhost/assistant-hub:latest
 
-echo "Started. STT + TTS on port 10300."
-if [ -n "${LLM_MODEL_FILENAME:-}${LLM_HF_REPO:-}" ]; then
-    echo "Conversation agent (llama-server) on http://<host>:8080/v1."
-fi
-echo "Logs: podman logs -f wyoming-voice"
-echo "Swap models at runtime: see README 'Using bigger models'."
+echo "Started on port 10300 (Wyoming and HTTP)."
+echo "Health: curl http://localhost:10300/health"
+echo "Logs:   docker logs -f assistant-hub"

@@ -23,7 +23,7 @@ If a model returns HTTP 400, try another model first. The backend is only a URL 
 
 ## Option 2: the local LLM
 
-The image contains llama-server from llama.cpp (prebuilt Vulkan release). If you set a model, it starts and serves an OpenAI-compatible API on port 8080 (`/v1`). Without a model, it does not start.
+The image contains llama-server from llama.cpp (prebuilt Vulkan release). If you set a model, it starts on 127.0.0.1, and `assistant-hub` serves its OpenAI-compatible API on the main port as `/llm/v1`. Without a model, it does not start.
 
 ### 1. Choose a model
 
@@ -37,11 +37,11 @@ Set one of these two variables, not both:
 Mount a host folder on `/models/llm`. Then the model, the download cache and the saved prompt cache stay on the host.
 
 ```bash
-docker run -d --name wyoming-voice \
+docker run -d --name assistant-hub \
   -v /srv/voice-models/llm:/models/llm \
   -e LLM_HF_REPO=inclusionAI/Ling-3.0-tiny-GGUF:Q4_K_M \
   --device /dev/dri/renderD128 --group-add "$(stat -c %g /dev/dri/renderD128)" \
-  -p 10300:10300 -p 8080:8080 --restart unless-stopped \
+  -p 10300:10300 --restart unless-stopped \
   ghcr.io/schaka/homeassistant-local-voice:latest
 ```
 
@@ -50,7 +50,7 @@ The image never deletes a model. When the model of `LLM_HF_REPO` is in the cache
 ### 2. Connect Home Assistant
 
 1. Go to Settings > Devices & services > Add Integration > llama.cpp (Home Assistant 2026.8 or later).
-2. Set the URL to `http://<host>:8080/v1`. Leave the API key empty.
+2. Set the URL to `http://<host>:10300/llm/v1`. Leave the API key empty, or use the value of `LLM_API_KEY`.
 3. Select the model.
 4. In Settings > Voice assistants, select the new llama.cpp agent as the conversation agent.
 
@@ -132,11 +132,11 @@ An Assist prompt with all tools has about 4,500 to 7,000 tokens. The first reque
 
 After the first request, llama-server keeps the processed prompt in its cache. Home Assistant puts the instructions, the device list and the tools before the current time, so the start of the prompt stays the same. A later request prefills only the new part, often about 20 tokens. Most of the remaining time is generation and thinking: 1 to 5 s.
 
-A restart empties this cache. With `LLM_SLOT_CACHE=on` (the default), `llm_slot_cache.py` saves the KV cache of the last Assist conversation to `/models/llm/slots`:
+A restart empties this cache. With `LLM_SLOT_CACHE=on` (the default), `assistant-hub` saves the KV cache of the last Assist conversation to `/models/llm/slots`:
 
 1. If the cache changed, it saves it every 5 minutes. It also saves it at each container stop.
 2. When llama-server starts, it restores the file.
-3. For 6,200 tokens of Ling-3.0-tiny, the file is 124 MB, and a save or a restore takes 0.3 s.
+3. For 6,200 tokens of Ling-3.0-tiny, the file is 124 MB. A save or a restore takes 0.3 s or less (13 ms and 25 ms for 3,450 tokens in a test).
 
 The first request after a restart then takes about 0.5 s instead of more than 60 s. `/models/llm` must be writable. The cache is empty again after each change of the prompt, of the exposed entities or of the tools.
 
@@ -148,17 +148,13 @@ After a tool result, the original Ling template starts the answer with an open `
 
 Upstream status: llama.cpp b11057 added a Ling 3.0 parser for a tool call inside an unclosed thinking block (issue #27462). It does not cover a plain answer without `</think>`, which is the case that the patched template fixes. The case can be reported in that issue with a recorded request, and the template patch can go to the model's Hugging Face repository.
 
-## Thinking guard
+## Thinking guard (removed)
 
-Ling does not need the guard with the patched template. The guard is an option for other models that show the same problem.
-
-With thinking on, a small model now and then writes its whole answer into the thinking block and does not close it. Then the reply has no text. Home Assistant does not show thinking, so it sees an empty reply, asks again, and stops after 10 rounds with "Unable to get response".
-
-With `LLM_THINKING_GUARD=on` (off by default), `llm_guard.py` takes port 8080, and llama-server moves to the internal port 8081. The guard reads each chat reply completely. If the reply has no text and no tool call, it sends the request once more with thinking off. The model still thinks for all other replies. Because the guard reads the complete reply first, the client gets it at once at the end, not word by word.
+The old image had an optional guard proxy (`LLM_THINKING_GUARD`). It retried an empty reply once without thinking. The patched Ling template solves that problem, so the Rust server has no guard. `/llm/...` streams every reply as llama-server sends it.
 
 ## Limits
 
-1. Without `LLM_API_KEY`, every client on your network can use the server, and CORS allows all origins. If port 8080 is reachable from outside your LAN, set `LLM_API_KEY`.
+1. Without `LLM_API_KEY`, every client on your network can use `/llm/...`. If port 10300 is reachable from outside your LAN, set `LLM_API_KEY`.
 2. With thinking on, a small model can think for a long time. `LLM_REASONING_BUDGET` limits it to 512 tokens by default.
 3. MTP speculative decoding is off. For Ling-3.0-tiny, it hangs on RADV (llama.cpp PR #26608).
 4. If the container has a memory limit, do not start a second llama-server in it. Two Ling instances need about 10 GB.

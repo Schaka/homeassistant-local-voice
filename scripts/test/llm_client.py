@@ -1,4 +1,4 @@
-"""Smoke-test the conversation agent (llama-server, OpenAI-compatible /v1).
+"""Smoke-test the conversation agent (llama-server through assistant-hub, /llm/v1).
 
 Sends one chat completion with a Home Assistant style HassTurnOn tool, the way
 the llama.cpp integration does, and prints the reply / tool calls + timing.
@@ -39,7 +39,7 @@ def filler_devices(n):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("prompt")
-    p.add_argument("--url", default="http://127.0.0.1:8080/v1")
+    p.add_argument("--url", default="http://127.0.0.1:10300/llm/v1")
     p.add_argument("--key", default="", help="sent as Bearer token; any value works unless LLM_API_KEY is set")
     p.add_argument("--devices", type=int, default=0, help="extra fake entities (~40 tokens each) to grow the prompt")
     args = p.parse_args()

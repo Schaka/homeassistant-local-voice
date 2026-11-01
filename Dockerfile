@@ -1,67 +1,58 @@
 # syntax=docker/dockerfile:1
 #
-# Self-contained Wyoming STT + TTS for Home Assistant, GPU-accelerated via
-# Vulkan, plus an optional local conversation agent (llama-server). Ships its
-# own Mesa Vulkan drivers (radv for AMD -- including ancient
-# GCN1 like the R7 250 -- plus llvmpipe for CPU-only hosts), so there is no
-# dependency on ROCm, CUDA, or a host-installed driver. Only the GPU device
-# node and render group are passed through at runtime.
+# assistant-hub image: one server on one port (10300) for a local Home
+# Assistant voice setup. Wyoming STT and TTS on Vulkan, an optional local LLM
+# (llama-server) under /llm, MCP tools on /mcp, web search (SearXNG, embedded
+# as a Python library) and YouTube search.
 #
-# The image is the single buildable artifact: `docker buildx bake final`
-# reproduces exactly what CI publishes to ghcr.io (see docker-bake.hcl and
-# .github/workflows/build.yml).
+# The image ships its own Mesa Vulkan drivers (RADV, ANV, llvmpipe). Only the
+# GPU device node is passed through at runtime.
+#
+# `docker buildx bake final` reproduces exactly what CI publishes (see
+# docker-bake.hcl and .github/workflows/image.yml).
+
+ARG RUST_VERSION=1.99.1
+ARG DEBIAN_VERSION=trixie
 
 # ============================================================================
-# Stage 1: audio.cpp (ggml, Vulkan backend, PocketTTS) built from source.
-# ggml-vulkan needs glslc (shaderc); Ubuntu ships no binary, so it is built
-# from shaderc source first. Slow (~30-60 min) -- CI's registry cache is what
-# makes this a no-op on rebuilds.
+# audio.cpp (ggml, Vulkan, PocketTTS) from source, at a pinned commit.
+# Debian ships glslc, so shaderc is not built from source.
 # ============================================================================
-FROM ubuntu:24.04 AS audiocpp-builder
+FROM debian:${DEBIAN_VERSION}-slim AS audiocpp-builder
+ARG AUDIOCPP_COMMIT=bd02977fc1fd7a03087f271b2d62cd2ea1bfc0aa
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        git cmake ninja-build gcc g++ python3 curl ca-certificates spirv-headers \
-        libvulkan-dev python3-venv \
+        git cmake ninja-build g++ python3 python3-venv ca-certificates curl \
+        glslc libvulkan-dev spirv-headers \
     && rm -rf /var/lib/apt/lists/*
-RUN git clone --depth 1 https://github.com/google/shaderc /shaderc \
-    && cd /shaderc \
-    && ./utils/git-sync-deps \
-    && cmake -GNinja -B build -DCMAKE_BUILD_TYPE=Release \
-        -DSHADERC_SKIP_TESTS=ON -DSHADERC_SKIP_EXAMPLES=ON -DSHADERC_SKIP_DOCS=ON \
-    && ninja -C build glslc_exe \
-    && install -m755 build/glslc/glslc /usr/local/bin/glslc \
-    && glslc --version | head -1
-RUN git clone --depth 1 https://github.com/0xShug0/audio.cpp /audio.cpp
 WORKDIR /audio.cpp
-# --native-cpu OFF: the default (-march=native) bakes in the ISA of the build
-# machine. A CI runner with AVX-512 produced a binary that died with SIGILL in
-# ggml_cpu_init on CPUs without it (i5-12400T). OFF gives the portable ggml
-# baseline (AVX2/FMA/F16C), which is enough for the small CPU part of TTS.
+RUN git init -q . \
+    && git remote add origin https://github.com/0xShug0/audio.cpp \
+    && git fetch -q --depth 1 origin "${AUDIOCPP_COMMIT}" \
+    && git checkout -q FETCH_HEAD
+# --native-cpu OFF: -march=native bakes in the ISA of the build machine. A CI
+# runner with AVX-512 produced a binary that died with SIGILL on an i5-12400T.
 RUN ./scripts/build_linux.sh --backend vulkan --native-cpu OFF \
-        --model-set custom --models pocket_tts \
-        --target audiocpp_cli --target audiocpp_server
+        --model-set custom --models pocket_tts --target audiocpp_server
 
 # ============================================================================
-# Stage 2: parakeet.cpp prebuilt Vulkan binary + C-API from the GitHub release.
+# parakeet.cpp: prebuilt Vulkan C library from the GitHub release.
 # ============================================================================
-FROM ubuntu:24.04 AS parakeet-stage
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        curl ca-certificates \
-    && curl -sL https://github.com/mudler/parakeet.cpp/releases/download/v0.5.0/parakeet-v0.5.0-lib-linux-vulkan-x64.tar.gz | tar xz \
-    && curl -sL https://github.com/mudler/parakeet.cpp/releases/download/v0.5.0/parakeet-v0.5.0-bin-linux-vulkan-x64.tar.gz | tar xz \
+FROM debian:${DEBIAN_VERSION}-slim AS parakeet-stage
+ARG PARAKEET_VERSION=v0.5.0
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends curl ca-certificates \
+    && curl -fsSL "https://github.com/mudler/parakeet.cpp/releases/download/${PARAKEET_VERSION}/parakeet-${PARAKEET_VERSION}-lib-linux-vulkan-x64.tar.gz" | tar xz \
+    && mv "/parakeet-${PARAKEET_VERSION}-lib-linux-vulkan-x64/libparakeet.so" /libparakeet.so \
     && rm -rf /var/lib/apt/lists/*
 
 # ============================================================================
-# Stage 3: llama.cpp prebuilt Vulkan release, for the optional conversation
-# agent (llama-server, OpenAI-compatible /v1). Every binary has RUNPATH
-# $ORIGIN, so the directory moves as one unit and its own libggml never
-# collides with the ggml inside libparakeet.so / audiocpp_server. Only
-# llama-server and its libraries are kept.
+# llama.cpp: prebuilt Vulkan release, only llama-server and its libraries.
+# Every binary has RUNPATH $ORIGIN, so its own libggml never collides with the
+# ggml inside libparakeet.so or audiocpp_server.
 # ============================================================================
-FROM ubuntu:24.04 AS llamacpp-stage
+FROM debian:${DEBIAN_VERSION}-slim AS llamacpp-stage
 ARG LLAMACPP_BUILD=b11966
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        curl ca-certificates \
-    && curl -sL "https://github.com/ggml-org/llama.cpp/releases/download/${LLAMACPP_BUILD}/llama-${LLAMACPP_BUILD}-bin-ubuntu-vulkan-x64.tar.gz" | tar xz \
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends curl ca-certificates \
+    && curl -fsSL "https://github.com/ggml-org/llama.cpp/releases/download/${LLAMACPP_BUILD}/llama-${LLAMACPP_BUILD}-bin-ubuntu-vulkan-x64.tar.gz" | tar xz \
     && mv "/llama-${LLAMACPP_BUILD}" /llama.cpp \
     && find /llama.cpp -maxdepth 1 -type f \
         \( -name 'llama*' ! -name 'llama-server' -o -name 'ggml-rpc-server' \) -delete \
@@ -70,12 +61,9 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     && rm -rf /var/lib/apt/lists/*
 
 # ============================================================================
-# Stage 4: model download. The ARGs are the "bigger models" lever -- override
-# them (CLI, docker-bake.hcl, or the CI workflow) to bake any other gguf /
-# embedding from the same repos into the image. See README. The LLM is
-# optional: an empty LLM_MODEL_URL (default) bakes none.
+# Default STT and TTS models. The ARGs are the "bigger models" lever.
 # ============================================================================
-FROM ubuntu:24.04 AS models-stage
+FROM debian:${DEBIAN_VERSION}-slim AS models-stage
 ARG STT_MODEL_URL=https://huggingface.co/mudler/parakeet-cpp-gguf/resolve/main/ctc-0.6b-q8_0.gguf
 ARG STT_MODEL_FILENAME=parakeet-ctc-0.6b-q8_0.gguf
 ARG TTS_MODEL_URL=https://huggingface.co/audio-cpp/audio.cpp-gguf/resolve/main/PocketTTS-GGUF/english/pocket-tts-english-q8_0.gguf
@@ -84,41 +72,61 @@ ARG TTS_VOICE_URL=https://huggingface.co/audio-cpp/audio.cpp-gguf/resolve/main/P
 ARG TTS_VOICE_FILENAME=alba.safetensors
 ARG LLM_MODEL_URL=
 ARG LLM_MODEL_FILENAME=
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        curl ca-certificates \
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends curl ca-certificates \
     && mkdir -p /models/stt /models/pocket-tts/embeddings /models/llm \
-    && curl -sL --retry 3 -o "/models/stt/${STT_MODEL_FILENAME}" "${STT_MODEL_URL}" \
-    && curl -sL --retry 3 -o "/models/pocket-tts/${TTS_MODEL_FILENAME}" "${TTS_MODEL_URL}" \
-    && curl -sL --retry 3 -o "/models/pocket-tts/embeddings/${TTS_VOICE_FILENAME}" "${TTS_VOICE_URL}" \
+    && curl -fsSL --retry 3 -o "/models/stt/${STT_MODEL_FILENAME}" "${STT_MODEL_URL}" \
+    && curl -fsSL --retry 3 -o "/models/pocket-tts/${TTS_MODEL_FILENAME}" "${TTS_MODEL_URL}" \
+    && curl -fsSL --retry 3 -o "/models/pocket-tts/embeddings/${TTS_VOICE_FILENAME}" "${TTS_VOICE_URL}" \
     && if [ -n "${LLM_MODEL_URL}" ]; then \
-        curl -sL --retry 3 -o "/models/llm/${LLM_MODEL_FILENAME}" "${LLM_MODEL_URL}"; \
+        curl -fsSL --retry 3 -o "/models/llm/${LLM_MODEL_FILENAME}" "${LLM_MODEL_URL}"; \
     fi \
     && rm -rf /var/lib/apt/lists/*
 
 # ============================================================================
-# Stage 4b: SearXNG (optional web search, SEARCH_ENABLED=on). Built on the
-# runtime base so the venv's Python matches. Pinned commit, git metadata and
-# caches removed. About 100 MB; it only runs when enabled.
+# SearXNG as a library: its source plus its packages in /opt/searxng/lib, for
+# the Python of the runtime base (3.13 on trixie). Its web server never runs.
 # ============================================================================
-FROM ubuntu:26.04 AS searxng-stage
+FROM debian:${DEBIAN_VERSION}-slim AS searxng-stage
 ARG SEARXNG_COMMIT=ff8f5ddcc9f2c58d8b0276ec030f6a3adfa17525
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         python3 python3-venv git ca-certificates \
-    && git clone --filter=blob:none https://github.com/searxng/searxng.git /opt/searxng/src \
-    && git -C /opt/searxng/src checkout "${SEARXNG_COMMIT}" \
-    && python3 -m venv /opt/searxng/venv \
-    && /opt/searxng/venv/bin/pip install --no-cache-dir -r /opt/searxng/src/requirements.txt \
-    && cd /opt/searxng/src && /opt/searxng/venv/bin/python -m searx.version freeze \
-    && rm -rf /opt/searxng/src/.git \
-    && SEARXNG_SECRET=build-check /opt/searxng/venv/bin/python -c "import searx.webapp" \
-    && find /opt/searxng -name __pycache__ -prune -exec rm -rf {} + \
     && rm -rf /var/lib/apt/lists/*
+RUN git clone -q --filter=blob:none https://github.com/searxng/searxng.git /opt/searxng/src \
+    && git -C /opt/searxng/src checkout -q "${SEARXNG_COMMIT}" \
+    && python3 -m venv /tmp/pip \
+    && /tmp/pip/bin/pip install --no-cache-dir --no-compile --target /opt/searxng/lib -r /opt/searxng/src/requirements.txt \
+    && cd /opt/searxng/src && PYTHONPATH=/opt/searxng/src:/opt/searxng/lib python3 -m searx.version freeze \
+    && rm -rf /opt/searxng/src/.git /tmp/pip \
+    && find /opt/searxng -name __pycache__ -prune -exec rm -rf {} +
 
 # ============================================================================
-# Stage 5: runtime. Ubuntu 26.04 is required: current Mesa builds need
-# GLIBC_ABI_GNU2_TLS (glibc >= 2.41); 24.04 cannot load them.
+# assistant-hub (Rust). cargo-chef builds the dependencies in their own layer,
+# so a code change rebuilds only the crate itself.
 # ============================================================================
-FROM ubuntu:26.04
+FROM lukemathwalker/cargo-chef:latest-rust-${RUST_VERSION}-slim-${DEBIAN_VERSION} AS chef
+WORKDIR /src
+
+FROM chef AS planner
+COPY Cargo.toml Cargo.lock ./
+COPY src src
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS rust-builder
+# PyO3 links against libpython3.13 of the runtime base.
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3-dev \
+    && rm -rf /var/lib/apt/lists/*
+ENV PYO3_PYTHON=/usr/bin/python3.13
+COPY --from=planner /src/recipe.json recipe.json
+RUN cargo chef cook --release --locked --recipe-path recipe.json
+COPY Cargo.toml Cargo.lock ./
+COPY src src
+RUN cargo build --release --locked && install -m755 target/release/assistant-hub /assistant-hub
+
+# ============================================================================
+# Runtime: Debian trixie slim. libpython3.13 is the only Python part: the hub
+# embeds it for SearXNG. tini reaps zombies and forwards signals.
+# ============================================================================
+FROM debian:${DEBIAN_VERSION}-slim
 ARG STT_MODEL_FILENAME=parakeet-ctc-0.6b-q8_0.gguf
 ARG TTS_MODEL_FILENAME=pocket-tts-english-q8_0.gguf
 ARG TTS_LANGUAGE=english
@@ -128,29 +136,23 @@ ARG STT_MODEL_NAME=parakeet-ctc-0.6b
 ARG LLM_MODEL_FILENAME=
 ARG LLM_FAMILY=
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        python3 python3-pip ca-certificates curl mesa-vulkan-drivers libgomp1 \
-    && pip3 install --break-system-packages --no-cache-dir wyoming numpy \
+        ca-certificates tini mesa-vulkan-drivers libvulkan1 libgomp1 libpython3.13 libssl3t64 libcurl4t64 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=audiocpp-builder /audio.cpp/build/linux-vulkan-release/bin/audiocpp_cli /usr/local/bin/audiocpp_cli
 COPY --from=audiocpp-builder /audio.cpp/build/linux-vulkan-release/bin/audiocpp_server /usr/local/bin/audiocpp_server
-COPY --from=parakeet-stage /parakeet-v0.5.0-lib-linux-vulkan-x64/libparakeet.so /usr/lib/libparakeet.so
-COPY --from=parakeet-stage /parakeet-v0.5.0-bin-linux-vulkan-x64/parakeet-cli /usr/local/bin/parakeet-cli
+COPY --from=parakeet-stage /libparakeet.so /usr/lib/libparakeet.so
 COPY --from=llamacpp-stage /llama.cpp /opt/llama.cpp
-# The release is built on an older Ubuntu; fail the build here, not at
-# runtime, if a shared library it needs (libvulkan, libssl, ...) is missing.
-RUN ! ldd /opt/llama.cpp/llama-server /opt/llama.cpp/*.so | grep 'not found'
+# Fail the build here, not at runtime, if a shared library is missing.
+RUN ! ldd /opt/llama.cpp/llama-server /opt/llama.cpp/*.so /usr/local/bin/audiocpp_server /usr/lib/libparakeet.so \
+        | grep 'not found'
 COPY --from=models-stage /models /models
 COPY --from=searxng-stage /opt/searxng /opt/searxng
-
+COPY --from=rust-builder /assistant-hub /usr/local/bin/assistant-hub
 COPY model_specs /app/model_specs
-COPY wyoming_voice.py verify_gguf.py llm_slot_cache.py llm_guard.py web_search_mcp.py entrypoint.sh /app/
-COPY templates/ /app/templates/
-RUN chmod +x /app/entrypoint.sh
+COPY templates /app/templates
 
-# Defaults, all overridable at runtime (env) -- see entrypoint.sh.
-ENV STT_MODEL_FILENAME=${STT_MODEL_FILENAME:-parakeet-ctc-0.6b-q8_0.gguf} \
-    TTS_MODEL_FILENAME=${TTS_MODEL_FILENAME:-pocket-tts-english-q8_0.gguf} \
+ENV STT_MODEL_FILENAME=${STT_MODEL_FILENAME} \
+    TTS_MODEL_FILENAME=${TTS_MODEL_FILENAME} \
     TTS_LANGUAGE=${TTS_LANGUAGE} \
     TTS_MODEL_ID=${TTS_MODEL_ID} \
     TTS_VOICE_ID=${TTS_VOICE_ID} \
@@ -158,7 +160,10 @@ ENV STT_MODEL_FILENAME=${STT_MODEL_FILENAME:-parakeet-ctc-0.6b-q8_0.gguf} \
     LLM_MODEL_FILENAME=${LLM_MODEL_FILENAME} \
     LLM_FAMILY=${LLM_FAMILY}
 
-# 10300: Wyoming (STT + TTS). 8080: llama-server, only when an LLM is set.
-# 8090: web search MCP endpoint, only with SEARCH_ENABLED=on.
-EXPOSE 10300 8080 8090
-ENTRYPOINT ["/app/entrypoint.sh"]
+# audiocpp_server finds model_specs/ relative to the working directory.
+WORKDIR /app
+# Everything on one port: Wyoming (STT, TTS) and HTTP (/llm, /mcp, /web, /youtube).
+EXPOSE 10300
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s CMD ["assistant-hub", "healthcheck"]
+ENTRYPOINT ["tini", "--", "assistant-hub"]
+CMD ["serve"]

@@ -1,6 +1,6 @@
 # homeassistant-local-voice
 
-A self-hosted voice assistant backend for Home Assistant in one container. It runs speech to text and text to speech on one Wyoming port, and can also run the conversation agent and a web search tool. It uses Vulkan on almost any GPU. Without a GPU, it uses the CPU.
+A self-hosted voice assistant backend for Home Assistant in one container and on one port. One Rust server (`assistant-hub`) answers Wyoming STT and TTS, the conversation agent under `/llm`, MCP tools on `/mcp`, and web and YouTube searches. It uses Vulkan on almost any GPU. Without a GPU, it uses the CPU.
 
 ## Features
 
@@ -9,25 +9,30 @@ A self-hosted voice assistant backend for Home Assistant in one container. It ru
 | Speech to text (STT) | [parakeet.cpp](https://github.com/mudler/parakeet.cpp) with NVIDIA Parakeet CTC 0.6B | On |
 | Text to speech (TTS) | [audio.cpp](https://github.com/0xShug0/audio.cpp) with PocketTTS-100M | On |
 | Conversation agent (LLM) | [llama.cpp](https://github.com/ggml-org/llama.cpp) llama-server with Ling-3.0-tiny, MiniCPM5-2B, LFM3-1.7B and others | Off. A model setting starts it. |
-| Web search tool for the agent | [SearXNG](https://github.com/searxng/searxng) and a small MCP server | Off |
+| Web search tool for the agent | [SearXNG](https://github.com/searxng/searxng), embedded as a library (no SearXNG server) | Off |
+| YouTube search (`/youtube/search`) | YouTube's own web API (InnerTube), no key | On |
 
 The image contains its own Mesa Vulkan drivers (RADV for AMD, ANV for Intel, llvmpipe for the CPU). You do not install drivers, ROCm or CUDA on the host.
 
 ## How it fits together
 
 ```
-Home Assistant
- ├─ Wyoming Protocol integration ──▶ :10300  STT + TTS          (always)
- ├─ llama.cpp integration ─────────▶ :8080   llama-server /v1   (optional)
- └─ Model Context Protocol ────────▶ :8090   web search /mcp    (optional)
+Home Assistant                              assistant-hub, port 10300
+ ├─ Wyoming Protocol integration ──▶  Wyoming      STT (parakeet.cpp, in process)
+ │                                                 TTS (audiocpp_server, child process)
+ ├─ llama.cpp integration ─────────▶  /llm/v1      llama-server (child process, optional)
+ ├─ Model Context Protocol ────────▶  /mcp         tools: web_search (optional)
+ └─ REST commands, scripts ────────▶  /web/search, /youtube/search, /health
 ```
+
+The server sorts each connection by its first byte: a Wyoming client starts with a JSON header (`{`), an HTTP client with a method name. The native engines listen on 127.0.0.1 only. [docs/architecture.md](docs/architecture.md) explains the parts.
 
 ## Quick start
 
 1. Start the container. Pass through the GPU render node:
 
    ```bash
-   docker run -d --name wyoming-voice \
+   docker run -d --name assistant-hub \
      --device /dev/dri/renderD128 --group-add "$(stat -c %g /dev/dri/renderD128)" \
      -p 10300:10300 --restart unless-stopped \
      ghcr.io/schaka/homeassistant-local-voice:latest
@@ -53,11 +58,12 @@ If the host has no GPU, the container uses the CPU. Speech is then slower but wo
 
 | Document | Content |
 |---|---|
-| [docs/voice.md](docs/voice.md) | STT and TTS: models, other languages and voices, GPU notes, podman, test clients |
+| [docs/architecture.md](docs/architecture.md) | The server, its routes, the child processes, the build and CI |
+| [docs/voice.md](docs/voice.md) | STT and TTS: models, other languages and voices, GPU notes, test clients |
 | [docs/llm.md](docs/llm.md) | The conversation agent: cloud models, the local LLM, supported models, Vulkan or CPU, prompt cache |
 | [docs/model-comparison.md](docs/model-comparison.md) | Which small models work as a voice agent on a CPU, and which do not (9 models measured) |
 | [docs/igpu-backends.md](docs/igpu-backends.md) | Intel iGPU: Vulkan, SYCL and OpenVINO compared, flash attention, power on the UHD 730 |
-| [docs/search.md](docs/search.md) | The web search tool for the agent |
+| [docs/search.md](docs/search.md) | Web search (MCP tool and `/web/search`) and YouTube search |
 | [docs/configuration.md](docs/configuration.md) | All environment variables, build arguments and ports |
 | [docs/home-llm-prompt.md](docs/home-llm-prompt.md) | A tested system prompt for the Local LLM (HomeLLM) add-on |
 | [docs/hardware-notes.md](docs/hardware-notes.md) | Notes for old AMD GPUs (GCN 1.0, 2 GB) |
@@ -68,4 +74,4 @@ If the host has no GPU, the container uses the CPU. Speech is then slower but wo
 - [audio.cpp](https://github.com/0xShug0/audio.cpp): ggml audio engine. PocketTTS by [Kyutai](https://github.com/Kyutai-Labs/pocket-tts) (Apache-2.0).
 - [llama.cpp](https://github.com/ggml-org/llama.cpp): llama-server (MIT).
 - [SearXNG](https://github.com/searxng/searxng): metasearch engine (AGPL-3.0).
-- [wyoming](https://github.com/rhasspy/pywyoming): protocol library (MIT).
+- [Wyoming protocol](https://github.com/rhasspy/wyoming) (MIT): implemented in Rust here.

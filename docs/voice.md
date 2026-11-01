@@ -1,18 +1,18 @@
 # Speech to text and text to speech
 
-One Wyoming server (`wyoming_voice.py`) on port 10300 offers both services. Home Assistant registers both from one Wyoming Protocol integration.
+`assistant-hub` offers both services over Wyoming on port 10300, the same port as its HTTP routes. Home Assistant registers both from one Wyoming Protocol integration.
 
 | Service | Engine | Default model | Name in Home Assistant |
 |---|---|---|---|
-| STT | parakeet.cpp (`libparakeet.so`) | Parakeet CTC 0.6B q8_0 | `parakeet` |
+| STT | parakeet.cpp (`libparakeet.so`, inside `assistant-hub`) | Parakeet CTC 0.6B q8_0 | `parakeet` |
 | TTS | audio.cpp (`audiocpp_server` on 127.0.0.1:8100) | PocketTTS English q8_0, voice `alba` | `audiocpp` |
 
 Both models stay loaded. STT returns lowercase text without punctuation, which is enough for Home Assistant.
 
 ## How the container protects the GPU
 
-1. STT and TTS use two Vulkan contexts in two processes. A file lock lets only one of them use the GPU at a time. Two jobs at the same time can reset an old GPU.
-2. If the GPU fails three times in a row ("device lost" or HTTP 500), `wyoming_voice.py` stops the container. Your restart policy then starts it again with a clean GPU state.
+1. STT and TTS use two Vulkan contexts: STT in `assistant-hub`, TTS in `audiocpp_server`. Both jobs start in `assistant-hub`, and a lock there lets only one of them use the GPU at a time. Two jobs at the same time can reset an old GPU.
+2. If the GPU fails three times in a row ("device lost" or HTTP 500), `assistant-hub` exits with an error. Your restart policy then starts it again with a clean GPU state.
 3. Before TTS, the server removes markdown from the text (stars, list dashes, headings, links) and says "degrees" for the degree sign. Small LLMs send markdown now and then, against the prompt.
 
 The GPU lock does not cover llama-server. If two satellites talk at the same time, the LLM and the speech jobs can overlap on the GPU.
@@ -79,7 +79,7 @@ docker run -d --name wyoming-voice \
 
 For another TTS language, set `TTS_LANGUAGE` (for example `german`), `TTS_LANGUAGES_BCP` (for example `de`) and the matching model and voice files.
 
-Before each start, `verify_gguf.py` makes sure that every model file is complete. A truncated download stops the container with a clear error, instead of a crash in the native loader.
+Before each start, `assistant-hub` makes sure that every model file is complete (`assistant-hub verify-gguf FILE` runs the same check by hand). A truncated download stops the container with a clear error, instead of a crash in the native loader.
 
 ## Bake other models into the image
 
@@ -92,29 +92,21 @@ docker buildx bake final \
   --set '*.args.STT_MODEL_NAME=parakeet-ctc-1.1b'
 ```
 
-## Podman
-
-Rootless podman needs some more flags. Replace `105` with the group ID of `/dev/dri/renderD128` on your host (`stat -c %g /dev/dri/renderD128`):
-
-```bash
-podman run -d --name wyoming-voice \
-  --device /dev/dri/renderD128 --group-add 105 \
-  --security-opt seccomp:unconfined --security-opt label=disable --ipc host \
-  -p 10300:10300 --restart unless-stopped \
-  ghcr.io/schaka/homeassistant-local-voice:latest
-```
-
 ## GPU selection
 
 The image finds the GPU through Mesa. `PARAKEET_DEVICE` (default `Vulkan0`) selects the GPU for STT, and `VK_DEVICE` (default `0`) selects it for TTS. Without a GPU, Vulkan device 0 is llvmpipe on the CPU.
 
 ## Test without Home Assistant
 
+The image has its own Wyoming client, so the test needs nothing else:
+
 ```bash
-# STT: send a 16 kHz mono wav, print the text
-python3 scripts/test/wyoming_stt_client.py clip16k.wav
-# TTS: write a sentence to a wav file
-python3 scripts/test/wyoming_tts_client.py "Hello from the voice assistant." out.wav
+# Wyoming info: the services and models that Home Assistant sees
+docker exec assistant-hub assistant-hub probe describe
+# TTS: write a sentence to a wav file in the container
+docker exec assistant-hub assistant-hub probe tts "Hello from the voice assistant." /tmp/out.wav
+# STT: transcribe a wav file (any rate, it is converted to 16 kHz mono)
+docker exec assistant-hub assistant-hub probe stt /tmp/out.wav
 ```
 
-Both clients connect to port 10300.
+`--addr host:port` points the client at another server.
