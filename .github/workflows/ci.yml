@@ -54,3 +54,22 @@ jobs:
       - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
         with:
           command: check all
+
+  # The llama.cpp bindings (src/media/*_sys.rs) must match the llama.cpp
+  # build in the image (LLAMACPP_BUILD in docker-bake.hcl). After a bump
+  # without scripts/gen-llama-bindings.sh, this job fails instead of the
+  # embedder at runtime.
+  bindings:
+    runs-on: ubuntu-latest
+    env:
+      BINDGEN_VERSION: 0.73.2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/bindgen
+          key: bindgen-${{ env.BINDGEN_VERSION }}-${{ runner.os }}
+      - run: sudo apt-get update -q && sudo apt-get install -y -q libclang-dev
+      - run: command -v bindgen || cargo install bindgen-cli --version "$BINDGEN_VERSION" --locked
+      - run: ./scripts/gen-llama-bindings.sh
+      - run: git diff --exit-code src/media/llama_sys.rs src/media/ggml_sys.rs

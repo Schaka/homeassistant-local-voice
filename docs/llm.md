@@ -126,7 +126,7 @@ The LLM runs on the CPU by default (`LLM_DEVICE=none`). On the Intel UHD 730 iGP
 
 If you use a GPU, set `LLM_EXTRA_ARGS=-fa off`. On a newer iGPU (Arrow Lake) or a dedicated GPU with enough memory, `LLM_DEVICE=Vulkan0` can be faster than the CPU. [igpu-backends.md](igpu-backends.md) has all measurements, also for SYCL and OpenVINO.
 
-An Assist prompt with all tools has about 4,500 to 7,000 tokens. The first request prefills all of it, which takes 30 to 70 s on a CPU. `python3 scripts/test/llm_client.py "Turn on the kitchen light." --devices 100` sends such a prompt for a test.
+An Assist prompt with all tools has about 4,500 to 7,000 tokens. The first request prefills all of it, which takes 30 to 70 s on a CPU. `docker exec <name> assistant-hub probe llm "Turn on the kitchen light." --devices 100` sends such a prompt for a test.
 
 ## Prompt cache
 
@@ -147,10 +147,6 @@ If a backup tool stops the container every night, the cache survives, but voice 
 After a tool result, the original Ling template starts the answer with an open `<think>`. Ling then often writes its answer at once and never closes the block. llama-server then returns the answer as thinking (`reasoning_content`), and the reply text is empty. With the patched template `templates/ling3.jinja`, the turn after a tool result starts with a closed `<think></think>`, and the problem did not occur. Ling still thinks after a user message, where it decides which tool to call.
 
 Upstream status: llama.cpp b11057 added a Ling 3.0 parser for a tool call inside an unclosed thinking block (issue #27462). It does not cover a plain answer without `</think>`, which is the case that the patched template fixes. The case can be reported in that issue with a recorded request, and the template patch can go to the model's Hugging Face repository.
-
-## Thinking guard (removed)
-
-The old image had an optional guard proxy (`LLM_THINKING_GUARD`). It retried an empty reply once without thinking. The patched Ling template solves that problem, so the Rust server has no guard. `/llm/...` streams every reply as llama-server sends it.
 
 ## Limits
 

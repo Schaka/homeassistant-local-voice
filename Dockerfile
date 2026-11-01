@@ -150,7 +150,8 @@ RUN ! ldd /opt/llama.cpp/llama-server /opt/llama.cpp/*.so /usr/local/bin/audiocp
 COPY --from=models-stage /models /models
 COPY --from=searxng-stage /opt/searxng /opt/searxng
 COPY --from=rust-builder /assistant-hub /usr/local/bin/assistant-hub
-COPY model_specs /app/model_specs
+# The model spec of the same audio.cpp commit as the binary.
+COPY --from=audiocpp-builder /audio.cpp/model_specs/pocket_tts.json /app/model_specs/pocket_tts.json
 COPY templates /app/templates
 
 ENV STT_MODEL_FILENAME=${STT_MODEL_FILENAME} \

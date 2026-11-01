@@ -117,5 +117,5 @@ On a CPU, a smaller quant makes the reply only a little faster. From Q4_K_M to Q
 
 1. Start the container with your models.
 2. Test speech: `docker exec <name> assistant-hub probe tts "Turn on the kitchen light." /tmp/a.wav`, then `docker exec <name> assistant-hub probe stt /tmp/a.wav`. Both print the time.
-3. Test the LLM with a realistic prompt from your workstation: `python3 scripts/test/llm_client.py "Turn on the kitchen light." --devices 100 --url http://<host>:10300/llm/v1`. Run it twice. The first run prefills the full prompt, the second uses the cache.
+3. Test the LLM with a realistic prompt: `docker exec <name> assistant-hub probe llm "Turn on the kitchen light." --devices 100`. Run it twice. The first run prefills the full prompt, the second uses the cache.
 4. The container log shows the prompt and reply speed of each request (`prompt eval time` and `eval time` lines of llama-server).

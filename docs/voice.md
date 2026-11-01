@@ -53,7 +53,7 @@ STT models come from [mudler/parakeet-cpp-gguf](https://huggingface.co/mudler/pa
 
 Each family has the quants `f16`, `q8_0`, `q6_k`, `q5_k` and `q4_k`. A smaller quant lets a bigger family fit.
 
-TTS models come from [audio-cpp/audio.cpp-gguf](https://huggingface.co/audio-cpp/audio.cpp-gguf). PocketTTS has about 30 English voices under `PocketTTS-GGUF/english/embeddings/`. It also has the languages `german`, `italian`, `portuguese` and `spanish`.
+TTS models come from [audio-cpp/audio.cpp-gguf](https://huggingface.co/audio-cpp/audio.cpp-gguf). PocketTTS has about 30 English voices under `PocketTTS-GGUF/english/embeddings/`. It also has the languages `french`, `german`, `italian`, `portuguese` and `spanish`.
 
 ## Change models without a rebuild
 

@@ -1,5 +1,6 @@
 //! Small Wyoming and HTTP clients for checks: `assistant-hub probe ...` and
-//! `assistant-hub healthcheck`. They need nothing else in the container.
+//! `assistant-hub healthcheck`. They need nothing else in the container, and
+//! they also work from another host with `--addr`.
 
 use std::path::Path;
 use std::time::Duration;
@@ -104,6 +105,89 @@ pub async fn tts(addr: &str, text: &str, out: &Path) -> Result<()> {
     Ok(())
 }
 
+/// The system prompt of `probe llm`: two devices plus `devices` filler entities.
+pub fn llm_system_prompt(devices: usize) -> String {
+    let mut prompt = String::from(
+        "You are a voice assistant for a smart home. Answer in one short sentence. \
+         Devices: light.kitchen 'Kitchen Light' (area: Kitchen) = off; \
+         light.bedroom 'Bedroom Light' (area: Bedroom) = on.",
+    );
+    for i in 0..devices {
+        prompt.push_str(&format!(
+            "\nsensor.room_{i}_temperature 'Room {i} Temperature' (area: Room {i}) = {}.5 °C;\
+             unit_of_measurement=°C;device_class=temperature",
+            18 + i % 7
+        ));
+    }
+    prompt
+}
+
+/// One chat completion with a HassTurnOn tool, the way Home Assistant's
+/// llama.cpp integration sends it. Prints the reply, the tool calls and the
+/// prompt and generation speed of llama-server.
+pub async fn llm(addr: &str, prompt: &str, devices: usize, key: Option<&str>) -> Result<()> {
+    let base = format!("http://{addr}/llm/v1");
+    let client = reqwest::Client::builder().timeout(Duration::from_secs(600)).build()?;
+    let auth = |r: reqwest::RequestBuilder| match key {
+        Some(k) => r.bearer_auth(k),
+        None => r,
+    };
+    let models: serde_json::Value = auth(client.get(format!("{base}/models")))
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    let model = models["data"][0]["id"]
+        .as_str()
+        .context("no model in /llm/v1/models")?
+        .to_owned();
+    println!("model: {model}");
+    let body = json!({
+        "model": model,
+        "messages": [
+            {"role": "system", "content": llm_system_prompt(devices)},
+            {"role": "user", "content": prompt},
+        ],
+        "tools": [{"type": "function", "function": {
+            "name": "HassTurnOn",
+            "description": "Turns on/opens a device or entity",
+            "parameters": {"type": "object", "properties": {
+                "name": {"type": "string"},
+                "area": {"type": "string"},
+                "domain": {"type": "array", "items": {"type": "string"}},
+            }},
+        }}],
+    });
+    let start = std::time::Instant::now();
+    let out: serde_json::Value = auth(client.post(format!("{base}/chat/completions")).json(&body))
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    let msg = &out["choices"][0]["message"];
+    if let Some(r) = msg["reasoning_content"].as_str().filter(|r| !r.is_empty()) {
+        println!("reasoning: {} chars (not spoken)", r.chars().count());
+    }
+    println!("content: {}", msg["content"].as_str().unwrap_or(""));
+    for call in msg["tool_calls"].as_array().into_iter().flatten() {
+        println!(
+            "tool_call: {} {}",
+            call["function"]["name"], call["function"]["arguments"]
+        );
+    }
+    let t = &out["timings"];
+    println!(
+        "wall {:.2} s, prompt {} tokens at {:.1} tokens/s, generation {:.1} tokens/s",
+        start.elapsed().as_secs_f64(),
+        t["prompt_n"],
+        t["prompt_per_second"].as_f64().unwrap_or(0.0),
+        t["predicted_per_second"].as_f64().unwrap_or(0.0)
+    );
+    Ok(())
+}
+
 /// GET /health over plain TCP. Exit code 0 when the server answers 200.
 pub async fn healthcheck(addr: &str) -> Result<()> {
     let mut stream = tokio::time::timeout(Duration::from_secs(5), TcpStream::connect(addr)).await??;
@@ -119,4 +203,18 @@ pub async fn healthcheck(addr: &str) -> Result<()> {
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn filler_devices_grow_the_prompt() {
+        let short = llm_system_prompt(0);
+        let long = llm_system_prompt(100);
+        assert!(short.contains("light.kitchen"));
+        assert_eq!(long.lines().count(), 101);
+        assert!(long.contains("sensor.room_99_temperature"));
+    }
 }

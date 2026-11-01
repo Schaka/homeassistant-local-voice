@@ -12,7 +12,7 @@ The server has one port for everything. [architecture.md](architecture.md) lists
 | `BIND_ADDRESS` | `0.0.0.0` | Address to listen on |
 | `RUST_LOG` | `info` | Log level, for example `debug` or `info,assistant_hub=debug` |
 
-The old ports 8080 (llama-server) and 8090 (MCP) are gone. Home Assistant connects to `http://<host>:10300/llm/v1` and `http://<host>:10300/mcp`.
+Home Assistant connects to `http://<host>:10300/llm/v1` and `http://<host>:10300/mcp`.
 
 ## Volumes
 
@@ -40,7 +40,7 @@ The image contains the default STT and TTS models. Mount a folder only to use ot
 | `TTS_DIR` | `/models/pocket-tts` | Folder with the TTS model and `embeddings/` |
 | `TTS_MODEL_FILENAME` | `pocket-tts-english-q8_0.gguf` | Model file in `TTS_DIR` |
 | `TTS_MODEL_ID` | `pocket-tts` | Model ID inside audio.cpp |
-| `TTS_LANGUAGE` | `english` | PocketTTS language: `english`, `german`, `italian`, `portuguese` or `spanish` |
+| `TTS_LANGUAGE` | `english` | PocketTTS language: `english`, `french`, `german`, `italian`, `portuguese` or `spanish` |
 | `TTS_LANGUAGES_BCP` | `en` | Language code that Home Assistant shows, for example `de` |
 | `TTS_VOICE_ID` | `alba` | Voice embedding in `TTS_DIR/embeddings/` |
 | `TTS_BACKEND` | `auto` | `vulkan`, `cpu` or `auto`. `auto` uses Vulkan if the server finds a Vulkan GPU at start, else the CPU. |
@@ -97,13 +97,6 @@ Both `JELLYFIN_URL` and `JELLYFIN_API_KEY` turn on `/jellyfin/search`. [search.m
 ## Media index
 
 `MEDIA_INDEX=on` adds semantic and typo-tolerant search to `/jellyfin/search`. [media-index.md](media-index.md) explains it and lists all its variables: `MEDIA_INDEX_DIR`, `MEDIA_INDEX_EPISODES`, `EMBED_MODEL`, `EMBED_MODEL_URL`, `EMBED_DIMS`, `EMBED_THREADS`, `MEDIA_MIN_SCORE`, `MEDIA_MIN_MARGIN` and `LLAMA_LIB`.
-
-## Removed variables
-
-| Variable | Why |
-|---|---|
-| `LLM_THINKING_GUARD` | The guard proxy is gone. The patched Ling template solves the empty replies. A set value only logs a warning. |
-| `SEARCH_MCP_PORT` | MCP is `/mcp` on the main port. A set value only logs a warning. |
 
 ## Build arguments
 

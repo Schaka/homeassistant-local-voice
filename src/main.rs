@@ -70,6 +70,18 @@ enum Probe {
     Stt { wav: PathBuf },
     /// Synthesize TEXT into a WAV file.
     Tts { text: String, out: PathBuf },
+    /// Send one chat request with a Home Assistant style tool to /llm/v1 and
+    /// print the reply, the tool calls and the speed.
+    Llm {
+        prompt: String,
+        /// Extra fake entities (about 40 tokens each), so the prompt is as
+        /// long as a real Assist prompt. 100 gives about 4,000 tokens.
+        #[arg(long, default_value_t = 0)]
+        devices: usize,
+        /// Bearer token. Only needed with LLM_API_KEY.
+        #[arg(long)]
+        key: Option<String>,
+    },
 }
 
 fn init_logging() {
@@ -105,6 +117,7 @@ fn main() -> ExitCode {
                     Probe::Describe => probe::describe(&addr).await,
                     Probe::Stt { wav } => probe::stt(&addr, &wav).await,
                     Probe::Tts { text, out } => probe::tts(&addr, &text, &out).await,
+                    Probe::Llm { prompt, devices, key } => probe::llm(&addr, &prompt, devices, key.as_deref()).await,
                 }
             })
         }),

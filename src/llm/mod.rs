@@ -249,7 +249,7 @@ mod tests {
     }
 
     #[test]
-    fn ling3_from_hf_matches_the_old_entrypoint() {
+    fn ling3_from_hf_args() {
         let c = cfg(
             Family::Ling3,
             LlmSource::HfRepo("inclusionAI/Ling-3.0-tiny-GGUF:Q4_K_M".into()),

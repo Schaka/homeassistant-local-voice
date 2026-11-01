@@ -1,7 +1,6 @@
 //! Configuration from environment variables.
 //!
-//! The variable names are the same as in the old `entrypoint.sh`, so existing
-//! container templates keep working. `docs/configuration.md` lists them all.
+//! `docs/configuration.md` lists them all.
 
 use std::env;
 use std::net::{IpAddr, SocketAddr};
@@ -103,7 +102,7 @@ impl Family {
         })
     }
 
-    /// The family from a model file or repository name, as the old entrypoint did.
+    /// The family from a model file or repository name.
     pub fn detect(name: &str) -> Option<Self> {
         let name = name.to_lowercase();
         if name.contains("ling-3") {
@@ -300,13 +299,6 @@ impl Config {
                 .transpose()?,
             internal_port: 8100,
         };
-
-        if var("LLM_THINKING_GUARD").as_deref() == Some("on") {
-            tracing::warn!("LLM_THINKING_GUARD is gone: the guard proxy was removed, the setting has no effect");
-        }
-        if var("SEARCH_MCP_PORT").is_some() {
-            tracing::warn!("SEARCH_MCP_PORT has no effect: the MCP endpoint is /mcp on the main port");
-        }
 
         Ok(Self {
             listen,
