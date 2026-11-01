@@ -1,0 +1,612 @@
+//! Media index: semantic and typo-tolerant search over the Jellyfin library.
+//!
+//! The index embeds every series, movie and (optionally) episode with
+//! EmbeddingGemma 2 ([`embed`]) and keeps the vectors on disk ([`index`]).
+//! It follows the library by itself:
+//!
+//! 1. At start: the saved index, then a full comparison with Jellyfin. Only
+//!    items with a new or changed text are embedded again.
+//! 2. Live: Jellyfin's WebSocket sends `LibraryChanged` with the IDs of
+//!    added, updated and removed items. They are applied after 20 s of quiet.
+//! 3. Every 6 hours, and after each WebSocket reconnect: a full comparison
+//!    again, for changes that the WebSocket missed.
+//!
+//! Embedding for the index runs on its own thread with a lower CPU priority
+//! (nice 10), so voice requests and the LLM keep the CPU. Queries use a
+//! second context at normal priority. [`MediaIndex::semantic`] returns a match
+//! only when it stands out from the rest of the library (see [`Gate`]).
+
+pub mod docs;
+pub mod embed;
+pub mod index;
+#[rustfmt::skip]
+mod ggml_sys;
+#[rustfmt::skip]
+mod llama_sys;
+
+use std::collections::HashSet;
+use std::path::PathBuf;
+use std::sync::mpsc;
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
+use std::time::{Duration, SystemTime};
+
+use anyhow::{Context, Result, bail};
+use futures_util::{SinkExt, StreamExt};
+use regex::Regex;
+use serde::Serialize;
+use serde_json::{Value, json};
+use tokio_util::sync::CancellationToken;
+
+use crate::jellyfin::Jellyfin;
+use embed::Embedder;
+use index::{Entry, Hit, Index, Kind};
+
+const PAGE: usize = 1000;
+/// Items per call of the embedding thread.
+const BATCH: usize = 16;
+const SAVE_EVERY: usize = 512;
+const FULL_SYNC_EVERY: Duration = Duration::from_secs(6 * 3600);
+const QUIET_BEFORE_APPLY: Duration = Duration::from_secs(20);
+const RECONNECT_DELAY: Duration = Duration::from_secs(30);
+const KEEPALIVE_EVERY: Duration = Duration::from_secs(30);
+/// Texts up to this many tokens. Longer ones are cut (plots are cut before).
+const MAX_TOKENS: u32 = 512;
+
+#[derive(Debug, Clone)]
+pub struct MediaConfig {
+    pub lib_llama: PathBuf,
+    pub model: PathBuf,
+    pub model_url: String,
+    pub dims: usize,
+    pub threads: i32,
+    pub dir: PathBuf,
+    pub episodes: bool,
+    pub gate: Gate,
+}
+
+/// When a semantic match counts. The scores of EmbeddingGemma 2 sit close
+/// together (0.65 to 0.8 for most items of a library), so an absolute score
+/// alone cannot separate a real match from the nearest wrong one. The second
+/// rule asks for a margin: the best score minus the mean score of the places
+/// 6 to 25. A query for a title that is not in the library has no item that
+/// stands out.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct Gate {
+    pub min_score: f32,
+    pub min_margin: f32,
+}
+
+impl Default for Gate {
+    fn default() -> Self {
+        Self {
+            min_score: 0.62,
+            min_margin: 0.05,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum State {
+    LoadingModel,
+    Indexing { done: usize, total: usize },
+    Ready,
+    Failed { error: String },
+}
+
+/// The result of a semantic search. `accepted` says whether it passed the gate.
+#[derive(Debug, Clone, Serialize)]
+pub struct Semantic {
+    pub id: String,
+    pub kind: Kind,
+    pub name: String,
+    pub score: f32,
+    pub margin: f32,
+    pub accepted: bool,
+}
+
+type Job = (Vec<String>, tokio::sync::oneshot::Sender<Result<Vec<Vec<f32>>>>);
+
+/// The embedding thread for the index, at nice 10.
+struct Worker {
+    tx: Mutex<mpsc::Sender<Job>>,
+}
+
+impl Worker {
+    fn start(embedder: Arc<dyn Embedder>) -> Result<Self> {
+        let (tx, rx) = mpsc::channel::<Job>();
+        std::thread::Builder::new().name("media-index".into()).spawn(move || {
+            // SAFETY: plain syscalls. On Linux, PRIO_PROCESS with a thread
+            // ID changes the priority of this thread only.
+            unsafe {
+                let tid = libc::gettid();
+                libc::setpriority(libc::PRIO_PROCESS, tid as libc::id_t, 10);
+            }
+            while let Ok((texts, reply)) = rx.recv() {
+                let _ = reply.send(embedder.embed(&texts));
+            }
+        })?;
+        Ok(Self { tx: Mutex::new(tx) })
+    }
+
+    async fn embed(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>> {
+        let (reply, rx) = tokio::sync::oneshot::channel();
+        self.tx
+            .lock()
+            .map_err(|_| anyhow::anyhow!("worker lock poisoned"))?
+            .send((texts, reply))
+            .map_err(|_| anyhow::anyhow!("embedding thread stopped"))?;
+        rx.await?
+    }
+}
+
+pub struct MediaIndex {
+    cfg: MediaConfig,
+    jellyfin: Arc<Jellyfin>,
+    index: RwLock<Index>,
+    query: OnceLock<Arc<dyn Embedder>>,
+    worker: OnceLock<Worker>,
+    state: Mutex<State>,
+    last_full_sync: Mutex<Option<SystemTime>>,
+    fingerprint: String,
+    /// Quiet time before live changes are applied, in ms. Tests shorten it.
+    quiet_ms: std::sync::atomic::AtomicU64,
+}
+
+static EPISODE_INTENT: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+    Regex::new(r"(?i)\b(episode|the one where|the part where|where they|scene)\b").expect("valid regex")
+});
+
+/// True if the query asks for one episode ("the episode where they adopt a dog").
+pub fn episode_intent(query: &str) -> bool {
+    EPISODE_INTENT.is_match(query)
+}
+
+fn poisoned<T>(_: T) -> anyhow::Error {
+    anyhow::anyhow!("index lock poisoned")
+}
+
+impl MediaIndex {
+    pub fn new(cfg: MediaConfig, jellyfin: Arc<Jellyfin>) -> Arc<Self> {
+        let fingerprint = format!(
+            "{}|dims={}|doc={}|episodes={}",
+            cfg.model.file_name().and_then(|f| f.to_str()).unwrap_or(""),
+            cfg.dims,
+            docs::DOC_VERSION,
+            cfg.episodes
+        );
+        Arc::new(Self {
+            index: RwLock::new(Index::new(cfg.dims)),
+            cfg,
+            jellyfin,
+            query: OnceLock::new(),
+            worker: OnceLock::new(),
+            state: Mutex::new(State::LoadingModel),
+            last_full_sync: Mutex::new(None),
+            fingerprint,
+            quiet_ms: std::sync::atomic::AtomicU64::new(QUIET_BEFORE_APPLY.as_millis() as u64),
+        })
+    }
+
+    fn set_state(&self, state: State) {
+        if let Ok(mut s) = self.state.lock() {
+            *s = state;
+        }
+    }
+
+    pub fn state(&self) -> State {
+        self.state.lock().map(|s| s.clone()).unwrap_or(State::Failed {
+            error: "lock poisoned".into(),
+        })
+    }
+
+    /// True when queries can be answered: the model is loaded and the index has entries.
+    pub fn ready(&self) -> bool {
+        self.query.get().is_some() && self.index.read().is_ok_and(|ix| !ix.is_empty())
+    }
+
+    /// Uses these embedders instead of loading the model (tests, or a model loaded elsewhere).
+    pub fn use_embedders(&self, query: Arc<dyn Embedder>, indexing: Arc<dyn Embedder>) -> Result<()> {
+        if query.dims() != self.cfg.dims || indexing.dims() != self.cfg.dims {
+            bail!("embedder size does not match the index size {}", self.cfg.dims);
+        }
+        let _ = self.worker.set(Worker::start(indexing)?);
+        let _ = self.query.set(query);
+        Ok(())
+    }
+
+    async fn download_model(&self) -> Result<()> {
+        if self.cfg.model.is_file() {
+            return Ok(());
+        }
+        let dir = self.cfg.model.parent().context("model path has no folder")?;
+        tokio::fs::create_dir_all(dir).await?;
+        tracing::info!("media index: downloading {}", self.cfg.model_url);
+        let mut resp = reqwest::get(&self.cfg.model_url).await?.error_for_status()?;
+        let tmp = self.cfg.model.with_extension("gguf.part");
+        let mut file = tokio::fs::File::create(&tmp).await?;
+        while let Some(chunk) = resp.chunk().await? {
+            tokio::io::AsyncWriteExt::write_all(&mut file, &chunk).await?;
+        }
+        tokio::io::AsyncWriteExt::flush(&mut file).await?;
+        drop(file);
+        if !crate::gguf::check(&tmp) {
+            let _ = tokio::fs::remove_file(&tmp).await;
+            bail!("the downloaded model failed the integrity check");
+        }
+        tokio::fs::rename(&tmp, &self.cfg.model).await?;
+        Ok(())
+    }
+
+    async fn load_model(&self) -> Result<()> {
+        self.download_model().await?;
+        let cfg = self.cfg.clone();
+        let (query, indexing) = tokio::task::spawn_blocking(move || -> Result<_> {
+            let model = embed::Model::load(&cfg.lib_llama, &cfg.model)?;
+            let query = embed::EmbedContext::new(model.clone(), MAX_TOKENS, cfg.threads, cfg.dims)?;
+            let indexing = embed::EmbedContext::new(model, MAX_TOKENS, (cfg.threads / 2).max(1), cfg.dims)?;
+            Ok((
+                Arc::new(query) as Arc<dyn Embedder>,
+                Arc::new(indexing) as Arc<dyn Embedder>,
+            ))
+        })
+        .await??;
+        self.use_embedders(query, indexing)
+    }
+
+    /// Loads the model and the saved index, syncs, then follows the library
+    /// until `cancel` fires.
+    pub async fn run(self: Arc<Self>, cancel: CancellationToken) {
+        if self.query.get().is_none()
+            && let Err(err) = self.load_model().await
+        {
+            tracing::error!("media index: {err:#}");
+            self.set_state(State::Failed {
+                error: format!("{err:#}"),
+            });
+            return;
+        }
+        if let Some(saved) = Index::load(&self.cfg.dir, &self.fingerprint, self.cfg.dims) {
+            tracing::info!("media index: {} saved entries", saved.len());
+            if let Ok(mut ix) = self.index.write() {
+                *ix = saved;
+            }
+        }
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<WsEvent>();
+        tokio::spawn(self.clone().listen(tx, cancel.clone()));
+
+        let mut pending = docs::Changes::default();
+        let mut next_full = tokio::time::Instant::now();
+        loop {
+            if tokio::time::Instant::now() >= next_full {
+                if let Err(err) = self.full_sync().await {
+                    tracing::warn!("media index: full sync failed: {err:#}");
+                    if self.index.read().is_ok_and(|ix| ix.is_empty()) {
+                        self.set_state(State::Failed {
+                            error: format!("{err:#}"),
+                        });
+                    }
+                }
+                next_full = tokio::time::Instant::now() + FULL_SYNC_EVERY;
+            }
+            let wait = if pending.is_empty() {
+                next_full.saturating_duration_since(tokio::time::Instant::now())
+            } else {
+                Duration::from_millis(self.quiet_ms.load(std::sync::atomic::Ordering::Relaxed))
+            };
+            tokio::select! {
+                () = cancel.cancelled() => return,
+                event = rx.recv() => match event {
+                    Some(WsEvent::Changes(c)) => {
+                        pending.changed.extend(c.changed);
+                        pending.removed.extend(c.removed);
+                    }
+                    // Changes during the outage are unknown: compare everything.
+                    Some(WsEvent::Reconnected) => next_full = tokio::time::Instant::now(),
+                    None => return,
+                },
+                () = tokio::time::sleep(wait) => {
+                    if !pending.is_empty() {
+                        let changes = std::mem::take(&mut pending);
+                        if let Err(err) = self.apply(changes).await {
+                            tracing::warn!("media index: update failed: {err:#}");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    async fn fetch_all(&self, types: &str, fields: &str) -> Result<Vec<Value>> {
+        let mut all = Vec::new();
+        loop {
+            let (items, total) = self.jellyfin.items_page(types, fields, all.len(), PAGE, None).await?;
+            let n = items.len();
+            all.extend(items);
+            if n == 0 || all.len() >= total {
+                return Ok(all);
+            }
+        }
+    }
+
+    /// Compares the whole library with the index.
+    pub async fn full_sync(&self) -> Result<()> {
+        let mut items = self.fetch_all("Series,Movie", docs::WORK_FIELDS).await?;
+        if self.cfg.episodes {
+            items.extend(self.fetch_all("Episode", docs::EPISODE_FIELDS).await?);
+        }
+        let docs: Vec<docs::Doc> = items.iter().filter_map(docs::document).collect();
+        let seen: HashSet<&str> = docs.iter().map(|d| d.entry.id.as_str()).collect();
+        let (removed, todo) = {
+            let mut ix = self.index.write().map_err(poisoned)?;
+            let gone: Vec<String> = ix
+                .entries()
+                .iter()
+                .filter(|e| !seen.contains(e.id.as_str()))
+                .map(|e| e.id.clone())
+                .collect();
+            let removed = ix.remove(&gone);
+            let todo: Vec<docs::Doc> = docs
+                .iter()
+                .filter(|d| ix.get(&d.entry.id).map(|e| e.hash) != Some(d.entry.hash))
+                .cloned()
+                .collect();
+            (removed, todo)
+        };
+        tracing::info!(
+            "media index: {} items in Jellyfin, {} to embed, {removed} removed",
+            docs.len(),
+            todo.len()
+        );
+        let embedded = !todo.is_empty();
+        self.embed_and_store(todo).await?;
+        if removed > 0 && !embedded {
+            self.save()?;
+        }
+        if let Ok(mut t) = self.last_full_sync.lock() {
+            *t = Some(SystemTime::now());
+        }
+        self.set_state(State::Ready);
+        Ok(())
+    }
+
+    /// Applies the changes of WebSocket messages.
+    pub async fn apply(&self, changes: docs::Changes) -> Result<()> {
+        let types = if self.cfg.episodes {
+            "Series,Movie,Episode"
+        } else {
+            "Series,Movie"
+        };
+        let fields = format!("{},{}", docs::WORK_FIELDS, docs::EPISODE_FIELDS);
+        let mut docs = Vec::new();
+        for chunk in changes.changed.chunks(100) {
+            let ids = chunk.join(",");
+            let (items, _) = self
+                .jellyfin
+                .items_page(types, &fields, 0, chunk.len(), Some(&ids))
+                .await?;
+            docs.extend(items.iter().filter_map(docs::document));
+        }
+        let removed = self.index.write().map_err(poisoned)?.remove(&changes.removed);
+        let todo: Vec<docs::Doc> = {
+            let ix = self.index.read().map_err(poisoned)?;
+            docs.into_iter()
+                .filter(|d| ix.get(&d.entry.id).map(|e| e.hash) != Some(d.entry.hash))
+                .collect()
+        };
+        tracing::info!("media index: live update, {} to embed, {removed} removed", todo.len());
+        let embedded = !todo.is_empty();
+        self.embed_and_store(todo).await?;
+        if removed > 0 && !embedded {
+            self.save()?;
+        }
+        Ok(())
+    }
+
+    async fn embed_and_store(&self, todo: Vec<docs::Doc>) -> Result<()> {
+        if todo.is_empty() {
+            return Ok(());
+        }
+        let worker = self.worker.get().context("embedder not loaded")?;
+        let total = todo.len();
+        let started = std::time::Instant::now();
+        let mut since_save = 0;
+        for (n, batch) in todo.chunks(BATCH).enumerate() {
+            self.set_state(State::Indexing { done: n * BATCH, total });
+            let vectors = worker.embed(batch.iter().map(|d| d.text.clone()).collect()).await?;
+            {
+                let mut ix = self.index.write().map_err(poisoned)?;
+                for (doc, v) in batch.iter().zip(&vectors) {
+                    ix.upsert(doc.entry.clone(), v)?;
+                }
+            }
+            since_save += batch.len();
+            if since_save >= SAVE_EVERY {
+                self.save()?;
+                since_save = 0;
+            }
+        }
+        self.save()?;
+        let secs = started.elapsed().as_secs_f64();
+        tracing::info!(
+            "media index: embedded {total} items in {secs:.0} s ({:.1}/s)",
+            total as f64 / secs.max(0.001)
+        );
+        Ok(())
+    }
+
+    fn save(&self) -> Result<()> {
+        self.index
+            .read()
+            .map_err(poisoned)?
+            .save(&self.cfg.dir, &self.fingerprint)
+    }
+
+    /// The `limit` entries most similar to `query` that pass `keep`, best first.
+    pub async fn rank(&self, query: &str, limit: usize, keep: impl Fn(&Entry) -> bool) -> Result<Vec<Hit>> {
+        let embedder = self.query.get().context("media index not loaded")?.clone();
+        let text = embed::query_text(query);
+        let vector = tokio::task::spawn_blocking(move || embedder.embed(&[text]))
+            .await??
+            .pop()
+            .context("no vector")?;
+        Ok(self.index.read().map_err(poisoned)?.rank(&vector, limit, keep))
+    }
+
+    /// The best series, movie or episode for a description, a title with
+    /// typos or a misheard title. Episodes take part only if the query asks
+    /// for one ([`episode_intent`]), and then only episodes. In a test on a
+    /// real library, episodes in the same ranking pushed the right series
+    /// down: a desert episode of "Planet Earth" beat "Dune" for "desert
+    /// planet with giant sand worms".
+    pub async fn semantic(&self, query: &str) -> Result<Option<Semantic>> {
+        let episodes = episode_intent(query);
+        let hits = self
+            .rank(query, RANK_FOR_GATE, |e| (e.kind == Kind::Episode) == episodes)
+            .await?;
+        let ix = self.index.read().map_err(poisoned)?;
+        Ok(gate(&hits, &ix, episodes, self.cfg.gate))
+    }
+
+    pub fn status(&self) -> Value {
+        let (series, movies, episodes) = self
+            .index
+            .read()
+            .map(|ix| (ix.count(Kind::Series), ix.count(Kind::Movie), ix.count(Kind::Episode)))
+            .unwrap_or_default();
+        let last = self
+            .last_full_sync
+            .lock()
+            .ok()
+            .and_then(|t| *t)
+            .map(|t| chrono::DateTime::<chrono::Local>::from(t).to_rfc3339());
+        json!({
+            "status": self.state(),
+            "series": series, "movies": movies, "episodes": episodes,
+            "last_full_sync": last,
+            "model": self.cfg.model.display().to_string(),
+            "dims": self.cfg.dims,
+            "gate": self.cfg.gate,
+        })
+    }
+
+    /// Follows Jellyfin's WebSocket and forwards library changes.
+    async fn listen(self: Arc<Self>, tx: tokio::sync::mpsc::UnboundedSender<WsEvent>, cancel: CancellationToken) {
+        let mut first = true;
+        loop {
+            let result = tokio::select! {
+                () = cancel.cancelled() => return,
+                r = self.listen_once(&tx, first) => r,
+            };
+            first = false;
+            match result {
+                Ok(()) => tracing::info!("media index: Jellyfin WebSocket closed, reconnecting"),
+                Err(err) => tracing::warn!("media index: Jellyfin WebSocket: {err:#}"),
+            }
+            tokio::select! {
+                () = cancel.cancelled() => return,
+                () = tokio::time::sleep(RECONNECT_DELAY) => {}
+            }
+        }
+    }
+
+    async fn listen_once(&self, tx: &tokio::sync::mpsc::UnboundedSender<WsEvent>, first: bool) -> Result<()> {
+        use tokio_tungstenite::tungstenite::{Message, client::IntoClientRequest};
+        let (base, key) = self.jellyfin.server();
+        let url = format!(
+            "{}/socket",
+            base.replacen("https://", "wss://", 1).replacen("http://", "ws://", 1)
+        );
+        let mut request = url.as_str().into_client_request()?;
+        let auth = format!(
+            "MediaBrowser Client=\"assistant-hub\", Device=\"assistant-hub\", DeviceId=\"assistant-hub-media-index\", Version=\"{}\", Token=\"{key}\"",
+            env!("CARGO_PKG_VERSION")
+        );
+        request.headers_mut().insert("Authorization", auth.parse()?);
+        let (mut ws, _) = tokio_tungstenite::connect_async(request).await?;
+        tracing::info!("media index: following Jellyfin library changes");
+        if !first {
+            let _ = tx.send(WsEvent::Reconnected);
+        }
+        let mut keepalive = tokio::time::interval(KEEPALIVE_EVERY);
+        loop {
+            tokio::select! {
+                _ = keepalive.tick() => {
+                    ws.send(Message::text(r#"{"MessageType":"KeepAlive"}"#)).await?;
+                }
+                msg = ws.next() => match msg {
+                    None | Some(Ok(Message::Close(_))) => return Ok(()),
+                    Some(Err(err)) => return Err(err.into()),
+                    Some(Ok(Message::Text(text))) => {
+                        if let Ok(v) = serde_json::from_str::<Value>(&text)
+                            && let Some(changes) = docs::library_changes(&v)
+                            && !changes.is_empty()
+                        {
+                            tracing::debug!(
+                                "media index: {} changed, {} removed",
+                                changes.changed.len(),
+                                changes.removed.len()
+                            );
+                            let _ = tx.send(WsEvent::Changes(changes));
+                        }
+                    }
+                    Some(Ok(_)) => {}
+                }
+            }
+        }
+    }
+}
+
+enum WsEvent {
+    Changes(docs::Changes),
+    Reconnected,
+}
+
+/// Places 6 to 25 of the ranking form the "rest of the library" for the margin.
+const MARGIN_FROM: usize = 5;
+const MARGIN_TO: usize = 25;
+const RANK_FOR_GATE: usize = 1000;
+
+/// Groups hits by work (an episode counts for its series unless `episodes`),
+/// keeps the best score of each work and applies the gate.
+pub fn gate(hits: &[Hit], ix: &Index, episodes: bool, gate: Gate) -> Option<Semantic> {
+    let mut seen = HashSet::new();
+    let mut works: Vec<(Entry, f32)> = Vec::new();
+    for hit in hits {
+        let entry = match (&hit.entry.kind, &hit.entry.series_id) {
+            (Kind::Episode, Some(series)) if !episodes => ix.get(series).cloned().unwrap_or_else(|| hit.entry.clone()),
+            _ => hit.entry.clone(),
+        };
+        if seen.insert(entry.id.clone()) {
+            works.push((entry, hit.score));
+        }
+        if works.len() >= MARGIN_TO {
+            break;
+        }
+    }
+    let (best, score) = works.first()?.clone();
+    let rest: Vec<f32> = works.iter().skip(MARGIN_FROM).map(|(_, s)| *s).collect();
+    let mean = if rest.is_empty() {
+        0.0
+    } else {
+        rest.iter().sum::<f32>() / rest.len() as f32
+    };
+    let margin = score - mean;
+    Some(Semantic {
+        id: best.id,
+        kind: best.kind,
+        name: match (&best.kind, &best.series_name) {
+            (Kind::Episode, Some(series)) => format!("{series}: {}", best.name),
+            _ => best.name,
+        },
+        score,
+        margin,
+        accepted: score >= gate.min_score && margin >= gate.min_margin,
+    })
+}
+
+#[cfg(test)]
+mod tests;
+
+#[cfg(test)]
+mod eval;

@@ -37,9 +37,10 @@ CI runs the first three, a release build and `cargo deny check all`. All must pa
 3. Never start a second llama-server. One model needs 2 to 9 GB.
 4. Keep tool descriptions and tool results short. Each token costs prefill time on a CPU. A search result has 150 to 300 tokens.
 5. Pin every version: crates in `Cargo.lock`, the toolchain in `rust-toolchain.toml` and `docker-bake.hcl`, actions by commit SHA, native engines by release or commit in `docker-bake.hcl`.
-6. A new environment variable needs a default, a line in `src/config.rs` and a row in `docs/configuration.md`.
-7. Write documentation in plain English: short sentences, active voice, no semicolons, no em-dashes.
-8. The target hardware includes 10-year-old office PCs ([docs/hardware.md](docs/hardware.md)). Do not add work to the request path that a 4th-generation Core i5 cannot do fast.
+6. The llama.cpp bindings (`src/media/llama_sys.rs`, `ggml_sys.rs`) are generated. After a bump of `LLAMACPP_BUILD`, run `scripts/gen-llama-bindings.sh` and the tests. Never edit them by hand.
+7. A new environment variable needs a default, a line in `src/config.rs` and a row in `docs/configuration.md`.
+8. Write documentation in plain English: short sentences, active voice, no semicolons, no em-dashes.
+9. The target hardware includes 10-year-old office PCs ([docs/hardware.md](docs/hardware.md)). Do not add work to the request path that a 4th-generation Core i5 cannot do fast.
 
 ## Set up a home
 

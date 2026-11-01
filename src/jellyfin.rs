@@ -12,8 +12,11 @@
 //!
 //! Jellyfin's own search needs the words of the title in order, so "spy
 //! family" does not find "Spy x Family". The server therefore keeps the list
-//! of all series and movie titles (refreshed every 10 min) and matches the
-//! spoken words against it.
+//! of all series and movie titles (refreshed every 10 min) and searches in
+//! stages ([`Match`]): the title, then trigram similarity for typos, then the
+//! optional media index (descriptions, mishearings), then Jellyfin's own
+//! search for items newer than the list. Each later stage needs a minimum
+//! similarity, because a wrong movie on the TV is worse than no answer.
 
 use std::time::{Duration, Instant};
 
@@ -26,6 +29,10 @@ use crate::config::JellyfinConfig;
 use crate::text;
 
 const LIBRARY_TTL: Duration = Duration::from_secs(600);
+/// Trigram similarity from which a title counts as a typo of the query.
+/// "lord of the rinks" has 0.6 with "The Lord of the Rings", "the office"
+/// only 0.4 with "Office Space".
+const FUZZY_MIN: f32 = 0.5;
 /// Words that people say or that STT writes between title words: "spy by
 /// family" for "Spy x Family". They are ignored in the query.
 const FILLER: &[&str] = &["the", "a", "an", "x", "by", "and", "ex", "of", "on", "jellyfin"];
@@ -34,6 +41,8 @@ const FILLER: &[&str] = &["the", "a", "an", "x", "by", "and", "ex", "of", "on", 
 #[serde(rename_all = "PascalCase")]
 pub struct Item {
     pub id: String,
+    /// Jellyfin sends episodes without a name now and then.
+    #[serde(default)]
     pub name: String,
     #[serde(rename = "Type")]
     pub kind: String,
@@ -45,6 +54,10 @@ pub struct Item {
     pub parent_index_number: Option<u32>,
     #[serde(default)]
     pub index_number: Option<u32>,
+    #[serde(default)]
+    pub series_id: Option<String>,
+    #[serde(default)]
+    pub series_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -69,8 +82,28 @@ pub enum Kind {
     Movie,
 }
 
+/// Which stage of the search found the item.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Match {
+    /// The title, its main part, or all query words in the title.
+    Title,
+    /// Trigram similarity of the title: typos and small mishearings.
+    Fuzzy,
+    /// The consonants of the title: misheard vowels ("freeran" for "Frieren").
+    Sound,
+    /// The media index (EmbeddingGemma 2): descriptions, worse mishearings.
+    Semantic,
+    /// Jellyfin's own search: items newer than the cached title list.
+    Jellyfin,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Pick {
+    /// The stage that found it, and its score (1 for a title match).
+    #[serde(rename = "match")]
+    pub matched: Match,
+    pub score: f32,
     pub kind: Kind,
     pub query: String,
     pub item_id: String,
@@ -144,6 +177,81 @@ pub fn best_match<'a>(query: &str, library: &'a [Item]) -> Option<&'a Item> {
         .map(|(_, item)| item)
 }
 
+/// The title before a colon: "Frieren" for "Frieren: Beyond Journey's End".
+fn main_title(title: &str) -> &str {
+    title.split(':').next().unwrap_or(title)
+}
+
+/// The series or movie whose title (or its main part) is most similar to the
+/// query, if the similarity reaches [`FUZZY_MIN`]. Ties go to series, then to
+/// the oldest unwatched movie, as in [`best_match`].
+pub fn fuzzy_match<'a>(query: &str, library: &'a [Item]) -> Option<(&'a Item, f32)> {
+    let q = text::trigrams(query);
+    library
+        .iter()
+        .map(|item| {
+            let full = text::trigram_similarity(&q, &text::trigrams(&item.name));
+            let main = text::trigram_similarity(&q, &text::trigrams(main_title(&item.name)));
+            (item, full.max(main))
+        })
+        .filter(|(_, sim)| *sim >= FUZZY_MIN)
+        .min_by(|(a, sa), (b, sb)| {
+            sb.total_cmp(sa).then_with(|| {
+                (
+                    a.kind != "Series",
+                    a.user_data.played,
+                    a.production_year.unwrap_or(i32::MAX),
+                )
+                    .cmp(&(
+                        b.kind != "Series",
+                        b.user_data.played,
+                        b.production_year.unwrap_or(i32::MAX),
+                    ))
+            })
+        })
+}
+
+/// The one series or movie whose main title has the same consonants as the
+/// query ([`text::skeleton`], at least 3). Several titles with the same
+/// consonants count as one only if they share the main title (a film series).
+pub fn sound_match<'a>(query: &str, library: &'a [Item]) -> Option<&'a Item> {
+    let q = text::skeleton(query);
+    if q.len() < 3 {
+        return None;
+    }
+    let found: Vec<&Item> = library
+        .iter()
+        .filter(|i| text::skeleton(main_title(&i.name)) == q)
+        .collect();
+    let first = *found.first()?;
+    let same_work = found
+        .iter()
+        .all(|i| text::squashed(main_title(&i.name)) == text::squashed(main_title(&first.name)));
+    if !same_work {
+        return None;
+    }
+    found.into_iter().min_by_key(|i| {
+        (
+            i.kind != "Series",
+            i.user_data.played,
+            i.production_year.unwrap_or(i32::MAX),
+        )
+    })
+}
+
+/// For a title-like query, the semantic winner must share letters with it:
+/// otherwise the model picks a related work ("House of the Dragon" for "game
+/// of thrones", "Futurama" for "fryren"). Descriptions need no such check.
+const SEMANTIC_TITLE_MIN: f32 = 0.2;
+
+pub fn semantic_title_ok(query: &str, title: &str) -> bool {
+    if !text::title_like(query) {
+        return true;
+    }
+    let sim = text::similarity(query, title).max(text::similarity(query, main_title(title)));
+    sim >= SEMANTIC_TITLE_MIN || text::skeleton(main_title(title)).starts_with(&text::skeleton(query))
+}
+
 /// "Spy x Family season 2 episode 3" becomes ("Spy x Family", Some(2), Some(3)).
 pub fn split_episode(query: &str) -> (String, Option<u32>, Option<u32>) {
     let words: Vec<String> = query.split_whitespace().map(str::to_owned).collect();
@@ -166,6 +274,8 @@ pub fn split_episode(query: &str) -> (String, Option<u32>, Option<u32>) {
 }
 
 pub struct Jellyfin {
+    /// The optional media index (MEDIA_INDEX=on), attached after start.
+    media: std::sync::OnceLock<std::sync::Arc<crate::media::MediaIndex>>,
     client: reqwest::Client,
     cfg: JellyfinConfig,
     /// (user ID, fetched at, items) per user.
@@ -176,6 +286,7 @@ impl Jellyfin {
     pub fn new(cfg: JellyfinConfig) -> Result<Self> {
         let client = reqwest::Client::builder().timeout(Duration::from_secs(15)).build()?;
         Ok(Self {
+            media: std::sync::OnceLock::new(),
             client,
             cfg,
             library: Mutex::new(None),
@@ -195,6 +306,121 @@ impl Jellyfin {
             bail!("Jellyfin {path}: HTTP {status}");
         }
         resp.json().await.with_context(|| format!("Jellyfin {path}: bad JSON"))
+    }
+
+    /// One page of library items as raw JSON, and the total count. `ids`
+    /// limits the result to these items. Collections are expanded, missing
+    /// (virtual) episodes are left out.
+    pub async fn items_page(
+        &self,
+        types: &str,
+        fields: &str,
+        start: usize,
+        limit: usize,
+        ids: Option<&str>,
+    ) -> Result<(Vec<Value>, usize)> {
+        let start = start.to_string();
+        let limit = limit.to_string();
+        let mut query = vec![
+            ("IncludeItemTypes", types),
+            ("Recursive", "true"),
+            ("Fields", fields),
+            ("StartIndex", start.as_str()),
+            ("Limit", limit.as_str()),
+            ("EnableImages", "false"),
+            ("EnableUserData", "false"),
+            ("CollapseBoxSetItems", "false"),
+            ("IsMissing", "false"),
+            ("EnableTotalRecordCount", "true"),
+        ];
+        if let Some(ids) = ids {
+            query.push(("Ids", ids));
+        }
+        let page: Value = self.get("/Items", &query).await?;
+        let items = page["Items"].as_array().cloned().unwrap_or_default();
+        let total = page["TotalRecordCount"].as_u64().unwrap_or(0) as usize;
+        Ok((items, total))
+    }
+
+    /// Uses the media index for the semantic stage of the search.
+    pub fn attach_media(&self, media: std::sync::Arc<crate::media::MediaIndex>) {
+        let _ = self.media.set(media);
+    }
+
+    /// One item with the data of a user.
+    async fn item(&self, user_id: &str, id: &str) -> Result<Item> {
+        self.get(&format!("/Items/{id}"), &[("userId", user_id)]).await
+    }
+
+    /// The best series, movie or episode for the spoken words: title, then
+    /// trigram similarity, then the media index, then Jellyfin's own search.
+    async fn find(&self, user_id: &str, words: &str, library: &[Item]) -> Result<Option<(Item, Match, f32)>> {
+        if let Some(item) = best_match(words, library) {
+            return Ok(Some((item.clone(), Match::Title, 1.0)));
+        }
+        if let Some((item, sim)) = fuzzy_match(words, library) {
+            tracing::info!("jellyfin {words:?}: fuzzy title match {} ({sim:.2})", item.name);
+            return Ok(Some((item.clone(), Match::Fuzzy, sim)));
+        }
+        if let Some(item) = sound_match(words, library) {
+            tracing::info!("jellyfin {words:?}: sound match {}", item.name);
+            return Ok(Some((item.clone(), Match::Sound, 0.5)));
+        }
+        if let Some(media) = self.media.get().filter(|m| m.ready()) {
+            match media.semantic(words).await {
+                Ok(Some(s)) => {
+                    let lexical = semantic_title_ok(words, &s.name);
+                    let verdict = match (s.accepted, lexical) {
+                        (true, true) => "accepted",
+                        (true, false) => "rejected, the title shares too few letters with the query",
+                        (false, _) => "rejected by the gate",
+                    };
+                    tracing::info!(
+                        "jellyfin {words:?}: semantic {} ({:?}) score {:.3} margin {:.3}: {verdict}",
+                        s.name,
+                        s.kind,
+                        s.score,
+                        s.margin
+                    );
+                    if s.accepted && lexical {
+                        let item = match library.iter().find(|i| i.id == s.id) {
+                            Some(i) => i.clone(),
+                            None => self.item(user_id, &s.id).await?,
+                        };
+                        return Ok(Some((item, Match::Semantic, s.score)));
+                    }
+                }
+                Ok(None) => {}
+                Err(err) => tracing::warn!("jellyfin {words:?}: media index: {err:#}"),
+            }
+        }
+        // Items added after the title list was cached. Only a close title counts:
+        // Jellyfin's search finds "Office Space" for "the office".
+        let found: Items = self
+            .get(
+                "/Items",
+                &[
+                    ("searchTerm", words),
+                    ("IncludeItemTypes", "Series,Movie"),
+                    ("Recursive", "true"),
+                    ("userId", user_id),
+                    ("Limit", "1"),
+                ],
+            )
+            .await?;
+        if let Some(item) = found.items.into_iter().next() {
+            let sim = text::similarity(words, main_title(&item.name)).max(text::similarity(words, &item.name));
+            if sim >= FUZZY_MIN {
+                tracing::info!("jellyfin {words:?}: Jellyfin search {} ({sim:.2})", item.name);
+                return Ok(Some((item, Match::Jellyfin, sim)));
+            }
+        }
+        Ok(None)
+    }
+
+    /// The base URL and the API key, for the WebSocket of the media index.
+    pub fn server(&self) -> (&str, &str) {
+        (self.cfg.url.trim_end_matches('/'), &self.cfg.api_key)
     }
 
     /// The ID of a user name (case does not matter).
@@ -286,16 +512,32 @@ impl Jellyfin {
             return Ok(None);
         }
         let library = self.library(&user_id).await?;
-        // No fallback to Jellyfin's own search: it finds "Office Space" for
-        // "the office". Nothing is a better answer than the wrong movie.
-        let Some(item) = best_match(&words, &library).cloned() else {
+        let Some((mut item, matched, score)) = self.find(&user_id, &words, &library).await? else {
             return Ok(None);
         };
+        // An episode from the media index: with a season or episode number, its
+        // series decides. Otherwise that episode plays.
+        if item.kind == "Episode"
+            && (season.is_some() || episode.is_some())
+            && let Some(series) = item
+                .series_id
+                .as_deref()
+                .and_then(|id| library.iter().find(|i| i.id == id))
+        {
+            item = series.clone();
+        }
+        let title = if item.kind == "Episode" {
+            item.series_name.clone().unwrap_or_else(|| item.name.clone())
+        } else {
+            item.name.clone()
+        };
         let pick = |ep: Option<&Item>, target: &Item| Pick {
+            matched,
+            score,
             kind: if ep.is_some() { Kind::Episode } else { Kind::Movie },
             query: words.clone(),
             item_id: target.id.clone(),
-            title: item.name.clone(),
+            title: title.clone(),
             episode_title: ep.map(|e| e.name.clone()),
             season: ep.and_then(|e| e.parent_index_number),
             episode: ep.and_then(|e| e.index_number),
@@ -308,6 +550,9 @@ impl Jellyfin {
             user_id: user_id.clone(),
             server_id: server_id.clone(),
         };
+        if item.kind == "Episode" {
+            return Ok(Some(pick(Some(&item), &item)));
+        }
         if item.kind != "Series" {
             return Ok(Some(pick(None, &item)));
         }
@@ -362,6 +607,8 @@ mod tests {
             },
             parent_index_number: None,
             index_number: None,
+            series_id: None,
+            series_name: None,
         }
     }
 
@@ -394,6 +641,61 @@ mod tests {
         assert_eq!(name("lord of the rings"), Some("The Lord of the Rings: The Two Towers"));
         assert_eq!(name("breaking bad"), None);
         assert_eq!(name("the office"), None, "Office Space shares only one of two words");
+    }
+
+    #[test]
+    fn episodes_without_a_name_parse() {
+        // Seen on a real server: one episode of "One Piece" had no Name, and
+        // the whole episode list failed to parse.
+        let list: Items =
+            serde_json::from_str(r#"{"Items": [{"Id": "e1", "Type": "Episode", "IndexNumber": 3}]}"#).unwrap();
+        assert_eq!(list.items[0].name, "");
+        assert_eq!(list.items[0].index_number, Some(3));
+    }
+
+    #[test]
+    fn sound_and_semantic_title_checks() {
+        let mut lib = library();
+        lib.push(item("Futurama", "Series", 1999, false));
+        assert_eq!(
+            sound_match("freeran", &lib).map(|i| i.name.as_str()),
+            Some("Frieren: Beyond Journey's End")
+        );
+        assert_eq!(
+            sound_match("fryren", &lib).map(|i| i.name.as_str()),
+            Some("Frieren: Beyond Journey's End")
+        );
+        assert!(sound_match("xy", &lib).is_none(), "too short");
+        assert!(semantic_title_ok(
+            "harry potter",
+            "Harry Potter and the Chamber of Secrets"
+        ));
+        assert!(semantic_title_ok("arcain", "Arcane"));
+        assert!(!semantic_title_ok("fryren", "Futurama"));
+        assert!(!semantic_title_ok("game of thrones", "House of the Dragon"));
+        assert!(!semantic_title_ok("breaking bad", "Franklin & Bash"));
+        assert!(!semantic_title_ok("the office", "La oficina"));
+        assert!(semantic_title_ok("anime about a spy who adopts a girl", "Spy x Family"));
+    }
+
+    #[test]
+    fn fuzzy_titles() {
+        let mut lib = library();
+        lib.push(item("Interstellar", "Movie", 2014, false));
+        let name = |q: &str| fuzzy_match(q, &lib).map(|(i, _)| i.name.clone());
+        // All three Lord of the Rings films share the main title: the oldest unwatched one wins.
+        assert_eq!(
+            name("lord of the rinks").as_deref(),
+            Some("The Lord of the Rings: The Two Towers")
+        );
+        assert_eq!(name("intersteller").as_deref(), Some("Interstellar"));
+        assert_eq!(
+            name("frieren beyond journeys end").as_deref(),
+            Some("Frieren: Beyond Journey's End")
+        );
+        assert_eq!(name("the office"), None);
+        assert_eq!(name("zebra"), None);
+        assert!(fuzzy_match("dune", &lib).is_some_and(|(_, s)| (s - 1.0).abs() < 1e-6));
     }
 
     #[test]

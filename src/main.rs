@@ -11,6 +11,7 @@ mod gpu;
 mod jellyfin;
 mod llm;
 mod mcp;
+mod media;
 mod probe;
 mod search;
 mod server;
@@ -259,6 +260,16 @@ async fn run(cfg: Config) -> Result<bool> {
         Some(j) => Some(Arc::new(jellyfin::Jellyfin::new(j)?)),
         None => None,
     };
+    // The media index loads its model and syncs in the background.
+    let media = match (cfg.media.clone(), &jellyfin) {
+        (Some(m), Some(jf)) => {
+            let index = media::MediaIndex::new(m, jf.clone());
+            jf.attach_media(index.clone());
+            tokio::spawn(index.clone().run(shutdown.clone()));
+            Some(index)
+        }
+        _ => None,
+    };
 
     let voice = Arc::new(wyoming::Voice {
         stt,
@@ -276,6 +287,7 @@ async fn run(cfg: Config) -> Result<bool> {
         web_search,
         youtube,
         jellyfin,
+        media,
     });
 
     let listener = tokio::net::TcpListener::bind(cfg.listen)

@@ -80,7 +80,7 @@ Jellyfin's own search needs the title words in order, so it does not find "Spy x
 2. The title before a colon ("frieren" is "Frieren: Beyond Journey's End").
 3. All words of the query are words of the title, and they are more than half of its words. The words "the", "x", "by", "and" and "of" do not count, because people and STT add or drop them ("spy by family").
 
-There is no fallback to Jellyfin's own search: it finds "Office Space" for "the office". If nothing matches, the answer is 404 (`no_result`).
+If no title matches, the search goes on in stages: trigram similarity for typos ("lord of the rinks"), then the consonants for misheard vowels ("freeran" for "Frieren"), then the optional media index for descriptions and misheard titles, then Jellyfin's own search for items newer than the title list. Each later stage needs a minimum similarity, because Jellyfin's own search finds "Office Space" for "the office". [media-index.md](media-index.md) describes the stages. The answer names the stage in `match` and its score in `score`. If nothing matches, the answer is 404 (`no_result`).
 
 The apps open the item by `item_id`: Wholphin with `wholphin://play?itemId=...&position=<ms>&userId=...&serverId=...`, the official Kodi add-on with `plugin://plugin.video.jellyfin/?mode=play&id=...`. [examples/home-assistant/scripts/play_jellyfin.yaml](../examples/home-assistant/scripts/play_jellyfin.yaml) uses both.
 

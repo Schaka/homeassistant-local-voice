@@ -11,6 +11,7 @@ The container runs one Rust server, `assistant-hub`, on one port (10300). It is 
 | Web search: SearXNG | Inside `assistant-hub`, as a Python library through PyO3. SearXNG's own web server never starts. | none |
 | TTS: audiocpp_server | Child process. The hub restarts it after an exit. | 127.0.0.1:8100 |
 | LLM: llama-server | Child process. It starts only with a model setting. | 127.0.0.1:8081 |
+| Media index: EmbeddingGemma 2 | Inside `assistant-hub`, through the C API of `libllama.so`, on the CPU. Only with `MEDIA_INDEX=on`. | none |
 
 At start, `assistant-hub` asks `llama-server --list-devices` for the Vulkan GPUs. Without one, STT and TTS run on the CPU. Then it starts the child processes and restarts them 2 s after they exit. On SIGTERM it saves the prompt cache of llama-server, stops the children and exits. A stop takes less than a second.
 
@@ -33,6 +34,7 @@ A client that sends nothing for 30 s is dropped.
 | `GET /web/search?q=...&max_results=3` | Web search as JSON: the query as sent, the text that the MCP tool returns, and the results. |
 | `GET /youtube/search?q=...` | One YouTube video to play, as JSON: `kind`, `video_id`, `title`, `channel`, `url`. See [search.md](search.md). |
 | `GET /jellyfin/search?q=...` | One episode or movie of the Jellyfin library to play, as JSON. See [search.md](search.md#jellyfin-search). |
+| `GET /media/search?q=...`, `GET /media/status` | The media index: its ranking and its state. See [media-index.md](media-index.md). |
 
 ## Wyoming
 
@@ -51,7 +53,8 @@ STT and TTS share one GPU lock, so they never run on the GPU at the same time. T
 | `src/stt.rs`, `src/tts.rs`, `src/audio.rs`, `src/gpu.rs` | parakeet.cpp binding, audiocpp client and text cleanup, PCM and WAV, GPU detection and GPU lock |
 | `src/llm/` | llama-server arguments per model family, the proxy, the prompt cache |
 | `src/search.rs`, `src/youtube.rs`, `src/jellyfin.rs`, `src/mcp.rs` | SearXNG through PyO3, YouTube search, Jellyfin search, MCP |
-| `src/text.rs` | Matching of spoken names against titles |
+| `src/text.rs` | Matching of spoken names against titles, trigram similarity |
+| `src/media/` | Media index: EmbeddingGemma 2 through `libllama.so` (`embed.rs`, bindings in `llama_sys.rs` and `ggml_sys.rs`), item texts and Jellyfin's change messages (`docs.rs`), vectors on disk (`index.rs`), sync and gate (`mod.rs`), real-library evaluation (`eval.rs`) |
 | `src/supervisor.rs` | Child processes |
 | `src/gguf.rs` | Check for truncated model files before the engines load them |
 | `src/probe.rs` | `assistant-hub probe describe|stt|tts` and `assistant-hub healthcheck` |

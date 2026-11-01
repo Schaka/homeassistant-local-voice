@@ -12,6 +12,7 @@ A self-hosted voice assistant backend for Home Assistant in one container and on
 | Web search tool for the agent | [SearXNG](https://github.com/searxng/searxng), embedded as a library (no SearXNG server) | Off |
 | YouTube search (`/youtube/search`) | YouTube's own web API (InnerTube), no key | On |
 | Jellyfin search (`/jellyfin/search`) | Your Jellyfin server: the next episode of a series or a movie | Off. `JELLYFIN_URL` and `JELLYFIN_API_KEY` turn it on. |
+| Media index for Jellyfin search | [EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2) in process: descriptions, typos, misheard titles, single episodes | Off. `MEDIA_INDEX=on` turns it on. |
 
 The image contains its own Mesa Vulkan drivers (RADV for AMD, ANV for Intel). You do not install drivers, ROCm or CUDA on the host. Without a GPU, STT and TTS run on the CPU backend of ggml.
 
@@ -65,6 +66,7 @@ Without a GPU, leave out the `--device` and `--group-add` lines. Speech then run
 | [docs/home-assistant.md](docs/home-assistant.md) | Home Assistant setup step by step: speech, agent, tools, sentence triggers, YouTube, ideas for automations |
 | [examples/](examples/) | Tested Home Assistant files: prompt, tool scripts, automations |
 | [AGENTS.md](AGENTS.md) | Instructions for AI agents: work on the code, or set up a home through the Home Assistant API |
+| [docs/media-index.md](docs/media-index.md) | The media index: search stages, the gate, sync with Jellyfin, resources, evaluation |
 | [docs/architecture.md](docs/architecture.md) | The server, its routes, the child processes, the build and CI |
 | [docs/voice.md](docs/voice.md) | STT and TTS: models, other languages and voices, GPU notes, test clients |
 | [docs/llm.md](docs/llm.md) | The conversation agent: cloud models, the local LLM, supported models, Vulkan or CPU, prompt cache |

@@ -12,6 +12,8 @@
 //! | `POST /mcp` | MCP tools for the conversation agent |
 //! | `GET /web/search?q=` | Web search as JSON |
 //! | `GET /youtube/search?q=` | One YouTube video to play, as JSON |
+//! | `GET /media/search?q=&limit=` | The media index ranking, for tests and other clients |
+//! | `GET /media/status` | State and size of the media index |
 //! | `GET /jellyfin/search?q=&devices=&user=` | One Jellyfin episode or movie to play, as JSON |
 
 use std::collections::HashMap;
@@ -45,6 +47,7 @@ pub struct AppState {
     pub web_search: Option<Arc<dyn SearchBackend>>,
     pub youtube: Option<Arc<YouTube>>,
     pub jellyfin: Option<Arc<Jellyfin>>,
+    pub media: Option<Arc<crate::media::MediaIndex>>,
 }
 
 type Shared = Arc<AppState>;
@@ -60,6 +63,8 @@ pub fn router(state: Shared) -> Router {
         .route("/web/search", get(web_search))
         .route("/youtube/search", get(youtube_search))
         .route("/jellyfin/search", get(jellyfin_search))
+        .route("/media/search", get(media_search))
+        .route("/media/status", get(media_status))
         .route("/llm", any(llm))
         .route("/llm/{*rest}", any(llm))
         .fallback(|| async { json_error(StatusCode::NOT_FOUND, "not_found", "no such route") })
@@ -83,6 +88,7 @@ async fn health(State(app): State<Shared>) -> Response {
         "web_search": app.web_search.is_some(),
         "youtube": app.youtube.is_some(),
         "jellyfin": app.jellyfin.is_some(),
+        "media_index": app.media.as_ref().map_or(json!("off"), |m| json!(m.state())),
     }))
     .into_response()
 }
@@ -206,6 +212,57 @@ async fn youtube_search(State(app): State<Shared>, Query(q): Query<HashMap<Strin
             json_error(StatusCode::BAD_GATEWAY, "upstream", format!("{err:#}"))
         }
     }
+}
+
+async fn media_status(State(app): State<Shared>) -> Response {
+    match &app.media {
+        Some(m) => axum::Json(m.status()).into_response(),
+        None => json_error(
+            StatusCode::NOT_FOUND,
+            "media_off",
+            "the media index is off (MEDIA_INDEX)",
+        ),
+    }
+}
+
+async fn media_search(State(app): State<Shared>, Query(q): Query<HashMap<String, String>>) -> Response {
+    let Some(media) = &app.media else {
+        return json_error(
+            StatusCode::NOT_FOUND,
+            "media_off",
+            "the media index is off (MEDIA_INDEX)",
+        );
+    };
+    let Some(query) = q.get("q").map(|s| s.trim()).filter(|s| !s.is_empty()) else {
+        return json_error(StatusCode::BAD_REQUEST, "missing_q", "the parameter q is missing");
+    };
+    if !media.ready() {
+        return json_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "not_ready",
+            "the media index is not ready yet",
+        );
+    }
+    let limit = q
+        .get("limit")
+        .and_then(|n| n.parse::<usize>().ok())
+        .unwrap_or(10)
+        .clamp(1, 100);
+    let (ranked, best) = match (media.rank(query, limit, |_| true).await, media.semantic(query).await) {
+        (Ok(r), Ok(b)) => (r, b),
+        (Err(err), _) | (_, Err(err)) => {
+            return json_error(StatusCode::INTERNAL_SERVER_ERROR, "media_failed", format!("{err:#}"));
+        }
+    };
+    axum::Json(json!({
+        "query": query,
+        "best": best,
+        "hits": ranked.iter().take(limit).map(|h| json!({
+            "id": h.entry.id, "kind": h.entry.kind, "name": h.entry.name,
+            "series": h.entry.series_name, "score": h.score,
+        })).collect::<Vec<_>>(),
+    }))
+    .into_response()
 }
 
 async fn jellyfin_search(State(app): State<Shared>, Query(q): Query<HashMap<String, String>>) -> Response {
@@ -346,6 +403,7 @@ mod tests {
             web_search: None,
             youtube: None,
             jellyfin: None,
+            media: None,
         });
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();

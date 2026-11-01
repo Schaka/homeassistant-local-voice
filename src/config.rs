@@ -20,6 +20,7 @@ pub struct Config {
     pub search: Option<SearchConfig>,
     pub youtube: Option<YoutubeConfig>,
     pub jellyfin: Option<JellyfinConfig>,
+    pub media: Option<crate::media::MediaConfig>,
 }
 
 #[derive(Debug, Clone)]
@@ -316,6 +317,7 @@ impl Config {
             search: Self::search_from_env()?,
             youtube: Self::youtube_from_env()?,
             jellyfin: Self::jellyfin_from_env()?,
+            media: Self::media_from_env()?,
         })
     }
 
@@ -394,6 +396,37 @@ impl Config {
             bail!("set JELLYFIN_USER (the Jellyfin user whose next episodes count)");
         };
         Ok(Some(JellyfinConfig { url, api_key, user }))
+    }
+
+    fn media_from_env() -> Result<Option<crate::media::MediaConfig>> {
+        if !on_off("MEDIA_INDEX", false)? {
+            return Ok(None);
+        }
+        if var("JELLYFIN_URL").is_none() || var("JELLYFIN_API_KEY").is_none() {
+            bail!("MEDIA_INDEX=on needs JELLYFIN_URL and JELLYFIN_API_KEY");
+        }
+        let cores = std::thread::available_parallelism().map_or(2, |n| n.get());
+        let gate = crate::media::Gate::default();
+        let dims: usize = parse_num("EMBED_DIMS", 512)?;
+        if !(64..=768).contains(&dims) {
+            bail!("EMBED_DIMS={dims} must be between 64 and 768");
+        }
+        Ok(Some(crate::media::MediaConfig {
+            lib_llama: PathBuf::from(var_or("LLAMA_LIB", "/opt/llama.cpp/libllama.so")),
+            model: PathBuf::from(var_or("EMBED_MODEL", "/models/llm/embed/embeddinggemma-2-Q8_0.gguf")),
+            model_url: var_or(
+                "EMBED_MODEL_URL",
+                "https://huggingface.co/ggml-org/embeddinggemma-2-GGUF/resolve/main/embeddinggemma-2-Q8_0.gguf",
+            ),
+            dims,
+            threads: parse_num("EMBED_THREADS", i32::try_from(cores.min(4)).unwrap_or(4))?,
+            dir: PathBuf::from(var_or("MEDIA_INDEX_DIR", "/models/llm/media-index")),
+            episodes: on_off("MEDIA_INDEX_EPISODES", true)?,
+            gate: crate::media::Gate {
+                min_score: parse_num("MEDIA_MIN_SCORE", gate.min_score)?,
+                min_margin: parse_num("MEDIA_MIN_MARGIN", gate.min_margin)?,
+            },
+        }))
     }
 
     fn youtube_from_env() -> Result<Option<YoutubeConfig>> {

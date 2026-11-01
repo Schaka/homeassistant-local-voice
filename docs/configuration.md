@@ -94,6 +94,10 @@ Both `JELLYFIN_URL` and `JELLYFIN_API_KEY` turn on `/jellyfin/search`. [search.m
 | `JELLYFIN_API_KEY` | empty | API key from Jellyfin (Dashboard > API Keys) |
 | `JELLYFIN_USER` | empty, required with the two above | The default user for the next episode and the resume position. A user with an open session on the TV box (`&devices=`) or `&user=` in the request wins ([search.md](search.md#jellyfin-search)). |
 
+## Media index
+
+`MEDIA_INDEX=on` adds semantic and typo-tolerant search to `/jellyfin/search`. [media-index.md](media-index.md) explains it and lists all its variables: `MEDIA_INDEX_DIR`, `MEDIA_INDEX_EPISODES`, `EMBED_MODEL`, `EMBED_MODEL_URL`, `EMBED_DIMS`, `EMBED_THREADS`, `MEDIA_MIN_SCORE`, `MEDIA_MIN_MARGIN` and `LLAMA_LIB`.
+
 ## Removed variables
 
 | Variable | Why |
