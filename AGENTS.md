@@ -46,7 +46,9 @@ CI runs the first three, a release build and `cargo deny check all`. All must pa
 
 ### Skills
 
-`.claude/skills/` has step-by-step procedures. Claude Code loads a skill by itself when its description matches the task, so each description starts with "Use when" and names the situations. Keep it so when you add or change a skill. Other agents read the skills as documents.
+`.agents/skills/` has step-by-step procedures in the [Agent Skills](https://agentskills.io) format. An agent that supports this format loads a skill by itself when the description matches the task. So each description starts with "Use when" and names the situations. Keep it so when you add or change a skill. Agents without skill support read the skills as documents.
+
+This file and `.agents/skills/` are the instructions for every agent. Write them so that any agent can follow them: do not name the tools or commands of one agent, and do not put instructions into a file or folder that only one agent reads. `.claude/skills` is a symbolic link to `.agents/skills`, because Claude Code reads project skills only from `.claude/skills`. Edit the skills in `.agents/skills/`.
 
 | Skill | Use it to |
 |---|---|
