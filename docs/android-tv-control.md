@@ -1,6 +1,6 @@
 # Control an Android TV box without root
 
-An Android TV or Google TV box is a good player for a voice assistant. Home Assistant can start apps on it, wake it, put it in standby and send keys. None of this needs root. This page explains the two ways in, what each one can do, and the traps.
+An Android TV or Google TV box is a good player for a voice assistant. Home Assistant can start apps on it, wake it, turn the TV off and send keys. None of this needs root. This page explains the two ways in, what each one can do, and the traps.
 
 The scripts [play_youtube.yaml](../examples/home-assistant/scripts/play_youtube.yaml) and [play_jellyfin.yaml](../examples/home-assistant/scripts/play_jellyfin.yaml) use this method. It works the same for any app that has a link or a package name.
 
@@ -8,12 +8,12 @@ The scripts [play_youtube.yaml](../examples/home-assistant/scripts/play_youtube.
 
 | Integration | Port | Use it to | Needs |
 |---|---|---|---|
-| Android TV Remote | 6466, 6467 | Wake the box, put it in standby, send keys, see the playing app | A PIN that the TV shows once |
+| Android TV Remote | 6466, 6467 | Wake the box, send keys, see the playing app | A PIN that the TV shows once |
 | Android Debug Bridge (ADB) | 5555 | Start a named app with a link (`am start`), check installed apps (`pm path`), send keys (`input keyevent`), read the state (`dumpsys`) | Debugging on in the developer options, one approval on the TV |
 
 ADB gives a shell with the user `shell` (uid 2000). This user is enough for `am start`, `pm path`, `input` and `dumpsys`. It cannot write to system files. So an action that needs root, such as the HDMI-CEC commands in `/sys/class/cec/cmd` of an Amlogic box, works only on boxes that give a root shell.
 
-Use both integrations on one box if you want both abilities. The Android TV Remote wakes the box and puts it in standby. ADB opens the app.
+Use both integrations on one box if you want both abilities. The Android TV Remote wakes the box. ADB opens the app and turns the TV off (see below).
 
 ## Turn on ADB on the box
 
@@ -34,20 +34,36 @@ If the integration cannot connect, the box did not get the key approved yet. Fro
 
 Some boxes have `ro.adb.secure=0`. They give a shell to every host on the network without a key. Treat such a box as open to anyone on your LAN.
 
-## Wake and standby
+## Wake the TV and turn it off
 
-A box that sends HDMI-CEC wakes the TV when it wakes, and it puts the TV in standby when it goes to standby. This works with the "Android TV Remote" entity:
+A box that sends HDMI-CEC wakes the TV when it wakes. The "Android TV Remote" entity wakes the box:
 
 ```yaml
 - action: remote.turn_on
   target:
     entity_id: remote.bedroom_player
-- action: remote.turn_off
-  target:
-    entity_id: remote.bedroom_player
 ```
 
-If an AV receiver sits between the box and the TV, turn the receiver on first and choose its input. The box does not do this.
+Turning the TV off is harder. Most ways to put the box to sleep send no CEC Standby, so the TV stays on. On the Nokia Streaming Box 8010, these ways send none: `remote.turn_off` of the Android TV Remote, `input keyevent KEYCODE_POWER` and `input keyevent KEYCODE_SLEEP`. This key sends one:
+
+```yaml
+- action: androidtv.adb_command
+  data:
+    entity_id: media_player.bedroom_adb
+    command: input keyevent KEYCODE_TV_POWER
+```
+
+The box broadcasts `<Standby>` (`4F:36`), puts itself to sleep, and the TV answers with its own `<Standby>` (`0F:36`). The box stays reachable on ports 5555 and 6466, and `remote.turn_on` wakes it. Send the key only if the box is awake, so that a TV on another input stays on.
+
+To check what a box sent, read the CEC log over ADB and look for the message:
+
+```sh
+dumpsys hdmi_control | grep 'message=<Standby>'
+```
+
+Other boxes can behave differently, so try each key and read the log. With root, a box can also write the CEC frames itself (see the Ugoos row below).
+
+If an AV receiver sits between the box and the TV, turn the receiver on first and choose its input. The box does not do this. Some receivers also send Standby to the TV when they turn off. This depends on a setting of the receiver, for example "Power Off Control" on a Denon.
 
 ## Start an app with a link
 
@@ -101,5 +117,5 @@ A box in standby needs time to answer. Wait for it before the first command:
 
 | Box | Android | Result |
 |---|---|---|
-| Nokia Streaming Box 8010 | 14 | ADB with an approved key. Wake and standby with Android TV Remote. TizenTube, SmartTube, Wholphin and the Jellyfin app start with `am start`. No root. |
+| Nokia Streaming Box 8010 | 14 | ADB with an approved key. Wake with Android TV Remote. TV off with `KEYCODE_TV_POWER` over ADB. TizenTube, SmartTube, Wholphin and the Jellyfin app start with `am start`. No root. |
 | Ugoos AM6B+ | 9 | ADB without a key (`ro.adb.secure=0`) with a root shell. Same app starts. HDMI-CEC from the box through `/sys/class/cec/cmd`. |
