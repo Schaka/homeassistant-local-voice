@@ -118,8 +118,8 @@ The Dockerfile bakes models and pins versions with these arguments. `docker-bake
 | `LLM_MODEL_FILENAME` | empty | File name of the baked LLM |
 | `LLM_FAMILY` | empty | Default of the variable `LLM_FAMILY` |
 | `LLAMACPP_BUILD` | `b12032` | llama.cpp release that the image contains |
-| `SEARXNG_COMMIT` | `9ded3bec1ae0b92e6abe40d27e1ca38d1906abbe` | SearXNG commit that the image contains |
-| `AUDIOCPP_COMMIT` | `c0cd77fa80285f8113883e0de06ffc781cf502f6` | audio.cpp commit that the image builds |
+| `SEARXNG_COMMIT` | `10db664f14bc34565d4fd6ca6d846b6f932976aa` | SearXNG commit that the image contains |
+| `AUDIOCPP_COMMIT` | `bee4f364b687c34d918048243731d34b091ee7a7` | audio.cpp commit that the image builds |
 | `PARAKEET_VERSION` | `v0.6.1` | parakeet.cpp release that the image contains |
 | `RUST_VERSION` | `1.99.1` | Rust toolchain of the build. Keep it the same as in `rust-toolchain.toml`. |
 

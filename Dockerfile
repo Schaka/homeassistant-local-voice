@@ -21,7 +21,7 @@ ARG DEBIAN_VERSION=trixie
 # Debian ships glslc, so shaderc is not built from source.
 # ============================================================================
 FROM debian:${DEBIAN_VERSION}-slim AS audiocpp-builder
-ARG AUDIOCPP_COMMIT=c0cd77fa80285f8113883e0de06ffc781cf502f6
+ARG AUDIOCPP_COMMIT=bee4f364b687c34d918048243731d34b091ee7a7
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         git cmake ninja-build g++ python3 python3-venv ca-certificates curl \
         glslc libvulkan-dev spirv-headers \
@@ -96,7 +96,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
 # the Python of the runtime base (3.13 on trixie). Its web server never runs.
 # ============================================================================
 FROM debian:${DEBIAN_VERSION}-slim AS searxng-stage
-ARG SEARXNG_COMMIT=9ded3bec1ae0b92e6abe40d27e1ca38d1906abbe
+ARG SEARXNG_COMMIT=10db664f14bc34565d4fd6ca6d846b6f932976aa
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         python3 python3-venv git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
