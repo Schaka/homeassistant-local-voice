@@ -23,7 +23,7 @@ If a model returns HTTP 400, try another model first. The backend is only a URL 
 
 ## Option 2: the local LLM
 
-The image contains llama-server from llama.cpp (prebuilt Vulkan release). If you set a model, it starts on 127.0.0.1, and `assistant-hub` serves its OpenAI-compatible API on the main port as `/llm/v1`. Without a model, it does not start.
+The image contains two programs named llama-server: the one of llama.cpp (prebuilt Vulkan release) and the one of ik_llama.cpp (built from source, CPU only). If you set a model, `assistant-hub` starts one of them on 127.0.0.1 and serves its OpenAI-compatible API on the main port as `/llm/v1`. You do not choose. The server picks the faster program for your model and device, see [Engines](#engines-llamacpp-and-ik_llamacpp). Without a model, neither program starts.
 
 ### 1. Choose a model
 
@@ -109,7 +109,7 @@ Add about 1.7 GB for STT and TTS (about 2.4 GB with the STT model `tdt-1.1b-q8_0
 Measured through Home Assistant on a CPU (i5-12400T), see [model-comparison.md](model-comparison.md):
 
 1. Ling-3.0-tiny Q4_K_M: the default. All answers correct, 5 to 7 s.
-2. MiniCPM5-2B Q4_K_M: good answers, smaller file. 15 to 17 s with the original template and a budget of 512 tokens, 6 s per question with the defaults on a Core Ultra 7 270K (see "Speed settings per family").
+2. MiniCPM5-2B Q4_K_M: good answers, smaller file. 15 to 17 s with the original template and a budget of 512 tokens, 6 s per question with a budget of 128 tokens on a Core Ultra 7 270K (see "Speed settings per family").
 3. LFM3-1.7B Q4_K_M: all answers correct. 23 to 26 s with the original template and a budget of 512 tokens, 8 s per question with the defaults on a Core Ultra 7 270K (see "Speed settings per family"). Keep its thinking on (`LLM_REASONING=on`, the default).
 4. Granite 4.0 H Tiny Q4_K_M: the fastest (3 s), but less reliable.
 5. Qwen3.5-4B Q4_K_M: correct, but 20 s.
@@ -128,15 +128,74 @@ If you use a GPU, set `LLM_EXTRA_ARGS=-fa off`. On a newer iGPU (Arrow Lake) or 
 
 An Assist prompt with all tools has about 4,500 to 7,000 tokens. The first request prefills all of it, which takes 30 to 70 s on a CPU. `docker exec <name> assistant-hub probe llm "Turn on the kitchen light." --devices 100` sends such a prompt for a test.
 
+## Engines: llama.cpp and ik_llama.cpp
+
+ik_llama.cpp is a fork of llama.cpp with faster CPU code. It runs on the CPU only. The server uses it when all of these are true:
+
+1. The model runs on the CPU (`LLM_DEVICE=none`).
+2. The model is one of these. The server reads the architecture from the model file.
+
+   | Model | `general.architecture` |
+   |---|---|
+   | Ling-3.0-tiny | `bailingmoe3` |
+   | MiniCPM5-2B | `llama` |
+   | LFM3-1.7B | `lfm3` |
+
+3. The CPU has AVX2 and FMA.
+
+In every other case, llama.cpp runs the model. The log names the engine and the reason at each start (`LLM engine: ...`). `LLM_ENGINE=llamacpp` always uses llama.cpp. `LLM_ENGINE=ik` uses ik_llama.cpp for any model on the CPU, also one that is not in the table. The server does not test such a model.
+
+If ik_llama.cpp fails to start twice in a row, or stops within two minutes of a start twice in a row, llama.cpp runs the model until the next start of the container. A model from `LLM_HF_REPO` that is not downloaded yet starts on llama.cpp, because ik_llama.cpp cannot download by repository name. When the model answers, the server restarts on ik_llama.cpp. During this one restart, requests get a 503.
+
+The server hides these differences, so the same settings work with both programs:
+
+1. ik_llama.cpp gets the model file, no `--device`, no `-ngl`, `--webui none` and `-n` for the reply limit.
+2. ik_llama.cpp uses 8 threads by default. The server sets the number of physical cores, at most 8 and at most the CPUs that the container is pinned to. `-t` in `LLM_EXTRA_ARGS` overrides it. A CPU quota (`--cpus`) does not lower the number. Prompt speed on performance cores of the Core Ultra 7 270K Plus for Ling-3.0-tiny: 4 threads on 4 pinned cores read 354 tokens/s and 8 threads on the same 4 cores read 195. On 8 pinned cores, 8 threads read 654 and 6 threads read 502. With a quota of 4 CPUs on 8 cores, 8 threads read 665 and 4 threads read 348.
+3. ik_llama.cpp saves a checkpoint 5 tokens before the end of each prompt. Ling and LFM3 have layers without a KV cache, so ik_llama.cpp can only go back to such a checkpoint. A new question then starts from a checkpoint far back, and the engine reads about 1,700 tokens again. The server sets `--ctx-checkpoints-tolerance 64`, so the checkpoint lies before the question and the engine reads about 60 tokens again. The values 16, 32, 64, 128 and 192 all worked, and the tokens read again grew with the value (median 22 to 74).
+4. Each program saves its prompt cache in its own file (`MODEL-CTX.slot` and `MODEL-CTX-ik.slot`). ik_llama.cpp writes two more files next to each one (`.checkpoints` and `.tokens.json`) and needs them to reuse the cache.
+5. ik_llama.cpp never answers a request to restore a file that does not exist. The server restores only files that exist, and it waits at most 30 s.
+
+`LLM_EXTRA_ARGS` goes to the program that runs. If an argument is only known to llama.cpp, use `LLM_ENGINE=llamacpp`.
+
+### Measured speed
+
+Intel Core Ultra 7 270K Plus, 6 performance cores (`taskset -c 0-5`, 6 threads), CPU only, 2026-11-02. The models are Q4_K_M. llama.cpp is b12032 (the image build). ik_llama.cpp is commit `35e0be5`, built for AVX2 and FMA only (`scripts/build-ik-llama.sh`). `llama-bench` with 6 threads:
+
+| Model | Engine | Prompt, 512 tokens | Prompt, 4,096 tokens | Generation |
+|---|---|---|---|---|
+| Ling-3.0-tiny | llama.cpp | 314 | 231 | 50.9 |
+| Ling-3.0-tiny | ik_llama.cpp | 627 | 538 | 75.1 |
+| MiniCPM5-2B | llama.cpp | 206 | 158 | 40.0 |
+| MiniCPM5-2B | ik_llama.cpp | 340 | 257 | 48.4 |
+| LFM3-1.7B | llama.cpp | 297 | 277 | 50.7 |
+| LFM3-1.7B | ik_llama.cpp | 492 | 454 | 63.8 |
+
+The numbers are tokens per second. The option `-rtr` (repack at load) made ik_llama.cpp slower for Q4_K_M, so the server does not set it.
+
+`assistant-hub eval llm` asks 12 Home Assistant style questions three times each, with the command line of the server and the budget of 128 thinking tokens. The temperature and top-p were 0.7 and 1.0 (Ling), 0.9 and 0.95 (MiniCPM5), and 0.1 and 1.0 (LFM3). Each model has 33 counted answers. One more question per model is a known failure ("turn off all the lights downstairs") and does not count. The prompt has about 3,800 tokens.
+
+| Model | Engine | Correct | First request | Per question (mean) | Tokens read again per question |
+|---|---|---|---|---|---|
+| Ling-3.0-tiny | llama.cpp | 30 of 33 | 19.2 s | 3.8 s | 88 |
+| Ling-3.0-tiny | ik_llama.cpp | 31 of 33 | 9.5 s | 2.1 s | 101 |
+| MiniCPM5-2B | llama.cpp | 30 of 33 | 24.7 s | 5.5 s | 78 |
+| MiniCPM5-2B | ik_llama.cpp | 29 of 33 | 16.0 s | 3.7 s | 73 |
+| LFM3-1.7B | llama.cpp | 33 of 33 | 18.6 s | 6.1 s | 717 |
+| LFM3-1.7B | ik_llama.cpp | 32 of 33 | 11.5 s | 3.2 s | 103 |
+
+The differences in correct answers are inside the noise of 33 answers. `assistant-hub eval compare` lets a new engine replace the old one only if it is within 5 points in quality and 20 % faster per question (or 30 % faster at the first request). All three models pass.
+
+Only this one CPU was measured with ik_llama.cpp. The gain in generation speed comes from the compute part of the work, so it can be smaller on a PC with slow memory. The gain in prompt speed stays.
+
 ## Prompt cache
 
 After the first request, llama-server keeps the processed prompt in its cache. Home Assistant puts the instructions, the device list and the tools before the current time, so the start of the prompt stays the same. A later request prefills only the new part, often about 20 tokens. Most of the remaining time is generation and thinking: 1 to 5 s.
 
-A restart empties this cache. With `LLM_SLOT_CACHE=on` (the default), `assistant-hub` saves the KV cache of the last Assist conversation to `/models/llm/slots`:
+A restart empties this cache. With `LLM_SLOT_CACHE=on` (the default), `assistant-hub` saves the KV cache of the last Assist conversation to `/models/llm/slots`. A change of the engine reads a different file, so the first request after such a change prefills the full prompt:
 
 1. If the cache changed, it saves it every 5 minutes. It also saves it at each container stop.
 2. When llama-server starts, it restores the file once. A slow health check under full CPU load is no restart, and a restore never runs during a request. A restore during a request would replace the current cache with the saved one, and the request would prefill the full prompt again.
-3. For 6,200 tokens of Ling-3.0-tiny, the file is 124 MB. A save or a restore takes 0.3 s or less (13 ms and 25 ms for 3,450 tokens in a test).
+3. For 6,200 tokens of Ling-3.0-tiny on llama.cpp, the file is 124 MB. A save or a restore takes 0.3 s or less (13 ms and 25 ms for 3,450 tokens in a test). On ik_llama.cpp, 4,750 tokens make 134 MB in three files, and the save and the restore take 14 ms and 31 ms.
 
 The first request after a restart then takes about 0.5 s instead of more than 60 s. `/models/llm` must be writable. The cache is empty again after each change of the prompt, of the exposed entities or of the tools.
 
@@ -162,22 +221,39 @@ Measured on 2026-11-01 with 10 Home Assistant style questions: a question, a too
 | MiniCPM5-2B Q4_K_M | Original template, budget 512 | 9 of 10 | 11.7 s |
 | MiniCPM5-2B Q4_K_M | Original template, budget 128 | 9 of 10 | 8.5 s, but one answer continued its thinking aloud |
 | MiniCPM5-2B Q4_K_M | Fix, budget 512 | 9 of 10 | 8.0 s |
-| MiniCPM5-2B Q4_K_M | Fix, budget 256 (default) | 9 of 10 | 5.9 s |
-| MiniCPM5-2B Q4_K_M | Fix, budget 128 | 7 of 10 | 6.2 s |
-| Ling-3.0-tiny Q4_K_M | Fix, budget 512 (default) | 9 of 10 | 2.9 s |
-| Ling-3.0-tiny Q4_K_M | Fix, budget 128 | 9 of 10 | 3.3 s |
+| MiniCPM5-2B Q4_K_M | Fix, budget 256 | 9 of 10 | 5.9 s |
+| MiniCPM5-2B Q4_K_M | Fix, budget 128 (default) | 7 of 10 | 6.2 s |
+| Ling-3.0-tiny Q4_K_M | Fix, budget 512 | 9 of 10 | 2.9 s |
+| Ling-3.0-tiny Q4_K_M | Fix, budget 128 (default) | 9 of 10 | 3.3 s |
 
-So the defaults of `LLM_REASONING_BUDGET` are 128 for `lfm3`, 256 for `minicpm5` and 512 for the others. Set the variable, or `--reasoning-budget` in `LLM_EXTRA_ARGS`, to choose another value. `LLM_MAX_TOKENS` (default 1024) sets the limit for one reply with `--n-predict`. As a result, a template that never closes its thinking block cannot generate until the 64k context is full. The question that all models got wrong was "turn off all the lights downstairs": they switched one room instead of the floor. The prompt of Home Assistant, with floors and areas, helps there.
+The defaults of `LLM_REASONING_BUDGET` are 128 for `ling3`, `minicpm5` and `lfm3`, and 512 for the others. The 7 of 10 of MiniCPM5 at 128 is one run of 10 questions. The larger test below measured no loss. Set the variable, or `--reasoning-budget` in `LLM_EXTRA_ARGS`, to choose another value. `LLM_MAX_TOKENS` (default 1024) sets the limit for one reply with `--n-predict`. As a result, a template that never closes its thinking block cannot generate until the 64k context is full. The question that all models got wrong was "turn off all the lights downstairs": they switched one room instead of the floor. The prompt of Home Assistant, with floors and areas, helps there.
 
 The token speed was not the problem: LFM3 generated 42 tokens per second, MiniCPM5 25 and Ling 35 on this CPU. The time went into thinking. Other settings did not help:
 
 1. A smaller micro-batch (`-ub 128` or `-ub 256`) or denser context checkpoints (`--checkpoint-min-step 0`). LFM3 and Ling have layers without a KV cache, which llama.cpp can only rewind to a saved checkpoint. With the defaults, LFM3 processes about 500 tokens again for each request (about 3 s here). The smaller micro-batches made one of the two request types fast and the other one process the whole prompt again. Ling processes only 60 to 150 tokens again with the defaults.
+
+### Quality by thinking budget
+
+A larger test compared the budgets 128 and 256 on a Radeon RX 9070 XT (llama.cpp b11966, Vulkan, 2026-11-02). It used 120 mock Home Assistant cases in 12 categories with 3 seeds each, so 360 runs per row. The prompt had about 2,000 tokens.
+
+| Model | Thinking | Task success | 95 % interval | Thinking tokens per case |
+|---|---|---|---|---|
+| Ling-3.0-tiny | off | 76.4 % | 71.7 to 80.5 | 0 |
+| Ling-3.0-tiny | budget 128 | 84.2 % | 80.0 to 87.6 | 104 |
+| Ling-3.0-tiny | budget 256 | 83.3 % | 79.1 to 86.8 | 123 |
+| MiniCPM5-2B | off | 78.3 % | 73.8 to 82.3 | 0 |
+| MiniCPM5-2B | budget 128 | 83.9 % | 79.7 to 87.3 | 142 |
+| MiniCPM5-2B | budget 256 | 86.1 % | 82.2 to 89.3 | 207 |
+
+The paired difference between the two budgets includes zero for both models: Ling -0.8 points (-2.2 to +0.6), MiniCPM5 +2.2 points (-1.7 to +6.1). Thinking itself raised success by 5.6 to 7.8 points. Budget 128 gives the same quality with fewer thinking tokens.
+
+With thinking on, Ling tried to unlock the front door in 12 of 360 runs, against 3 without thinking. The mock server blocked these attempts. Expose locks to Assist only if you accept this risk.
 
 ## Limits
 
 1. Without `LLM_API_KEY`, every client on your network can use `/llm/...`. If port 10300 is reachable from outside your LAN, set `LLM_API_KEY`.
 2. With thinking on, a small model can think for a long time. `LLM_REASONING_BUDGET` limits it. The default is 128 to 512 tokens, depending on the family.
 3. MTP speculative decoding is off. For Ling-3.0-tiny, it hangs on RADV (llama.cpp PR #26608).
-4. If the container has a memory limit, do not start a second llama-server in it. Two Ling instances need about 10 GB.
+4. The server runs one engine at a time. Do not start a second llama-server in the container: two Ling instances need about 10 GB.
 
 All LLM variables are in [configuration.md](configuration.md#conversation-agent-llm).

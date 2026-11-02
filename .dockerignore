@@ -1,8 +1,9 @@
-# Build context: only what the Dockerfile copies (Cargo files, build.rs and
-# src). The toolchain file stays out: the builder image pins the
+# Build context: only what the Dockerfile copies (Cargo files, build.rs, src
+# and the build script of ik_llama.cpp). The toolchain file stays out: the builder image pins the
 # same Rust version, and rustup would otherwise download extra components.
 *
 !Cargo.toml
 !Cargo.lock
 !build.rs
 !src/
+!scripts/build-ik-llama.sh

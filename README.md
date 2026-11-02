@@ -8,7 +8,7 @@ A self-hosted voice assistant backend for Home Assistant in one container and on
 |---|---|---|
 | Speech to text (STT) | [parakeet.cpp](https://github.com/mudler/parakeet.cpp) with NVIDIA Parakeet CTC 0.6B | On |
 | Text to speech (TTS) | [audio.cpp](https://github.com/0xShug0/audio.cpp) with PocketTTS-100M | On |
-| Conversation agent (LLM) | [llama.cpp](https://github.com/ggml-org/llama.cpp) llama-server with Ling-3.0-tiny, MiniCPM5-2B, LFM3-1.7B and others | Off. A model setting starts it. |
+| Conversation agent (LLM) | [llama.cpp](https://github.com/ggml-org/llama.cpp) llama-server, or [ik_llama.cpp](https://github.com/ikawrakow/ik_llama.cpp) on the CPU for the models it is verified for, with Ling-3.0-tiny, MiniCPM5-2B, LFM3-1.7B and others | Off. A model setting starts it. |
 | Web search tool for the agent | [SearXNG](https://github.com/searxng/searxng), embedded as a library (no SearXNG server) | Off |
 | YouTube search (`/youtube/search`) | YouTube's own web API (InnerTube), no key | On |
 | Jellyfin search (`/jellyfin/search`) | Your Jellyfin server: the next episode of a series or a movie | Off. `JELLYFIN_URL` and `JELLYFIN_API_KEY` turn it on. |
@@ -83,5 +83,6 @@ Without a GPU, leave out the `--device` and `--group-add` lines. Speech then run
 - [parakeet.cpp](https://github.com/mudler/parakeet.cpp): ggml Parakeet ASR (Apache-2.0). Models from [NVIDIA NeMo](https://github.com/NVIDIA-NeMo/NeMo).
 - [audio.cpp](https://github.com/0xShug0/audio.cpp): ggml audio engine. PocketTTS by [Kyutai](https://github.com/Kyutai-Labs/pocket-tts) (Apache-2.0).
 - [llama.cpp](https://github.com/ggml-org/llama.cpp): llama-server (MIT).
+- [ik_llama.cpp](https://github.com/ikawrakow/ik_llama.cpp): llama-server with faster CPU code (MIT).
 - [SearXNG](https://github.com/searxng/searxng): metasearch engine (AGPL-3.0).
 - [Wyoming protocol](https://github.com/rhasspy/wyoming) (MIT): implemented in Rust here.

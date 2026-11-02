@@ -1,0 +1,61 @@
+{
+ "data": [
+  {
+   "aliases": [
+    "Ling-3.0-tiny-Q4_K_M.gguf"
+   ],
+   "architecture": {
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "created": 1793641503,
+   "id": "Ling-3.0-tiny-Q4_K_M.gguf",
+   "meta": {
+    "ftype": "Q4_K - Medium",
+    "n_ctx": 8192,
+    "n_ctx_train": 131072,
+    "n_embd": 1536,
+    "n_params": 7893392800,
+    "n_vocab": 157184,
+    "size": 4817378944,
+    "vocab_type": 2
+   },
+   "object": "model",
+   "owned_by": "llamacpp",
+   "tags": []
+  }
+ ],
+ "models": [
+  {
+   "capabilities": [
+    "completion"
+   ],
+   "description": "",
+   "details": {
+    "families": [
+     ""
+    ],
+    "family": "",
+    "format": "gguf",
+    "parameter_size": "",
+    "parent_model": "",
+    "quantization_level": ""
+   },
+   "digest": "",
+   "model": "Ling-3.0-tiny-Q4_K_M.gguf",
+   "modified_at": "",
+   "name": "Ling-3.0-tiny-Q4_K_M.gguf",
+   "parameters": "",
+   "size": "",
+   "tags": [
+    ""
+   ],
+   "type": "model"
+  }
+ ],
+ "object": "list"
+}

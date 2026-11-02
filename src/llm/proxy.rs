@@ -128,6 +128,9 @@ impl LlmProxy {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::llm::fake::{Fake, HealthMode, closed_port};
+    use futures_util::StreamExt;
+    use std::time::Instant;
 
     #[test]
     fn paths() {
@@ -147,5 +150,199 @@ mod tests {
         h.insert(header::AUTHORIZATION, "Bearer wrong".parse().unwrap());
         assert!(!proxy.authorized(&h));
         assert!(LlmProxy::new(1, None).unwrap().authorized(&HeaderMap::new()));
+    }
+
+    fn request(method: &str, uri: &str, body: Body) -> Request<Body> {
+        Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("content-type", "application/json")
+            .body(body)
+            .unwrap()
+    }
+
+    fn chat(stream: bool) -> Request<Body> {
+        request(
+            "POST",
+            "/llm/v1/chat/completions",
+            Body::from(format!(
+                r#"{{"messages":[{{"role":"user","content":"hi"}}],"stream":{stream}}}"#
+            )),
+        )
+    }
+
+    async fn body_text(resp: Response) -> String {
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        String::from_utf8(bytes.to_vec()).unwrap()
+    }
+
+    async fn proxy_to_fake(fake: &Fake, key: Option<&str>) -> LlmProxy {
+        let port = fake.spawn().await;
+        LlmProxy::new(port, key.map(str::to_owned)).unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_json_answer_passes_through_unchanged() {
+        let fake = Fake::default();
+        let proxy = proxy_to_fake(&fake, None).await;
+        let resp = proxy.forward(chat(false)).await;
+        assert_eq!(resp.status(), 200);
+        assert!(
+            resp.headers()["content-type"]
+                .to_str()
+                .unwrap()
+                .starts_with("application/json")
+        );
+        let v: serde_json::Value = serde_json::from_str(&body_text(resp).await).unwrap();
+        assert_eq!(v["choices"][0]["finish_reason"], "tool_calls");
+        assert_eq!(
+            v["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
+            "HassTurnOn"
+        );
+        // The backend path has no /llm prefix, the body arrived as sent.
+        let seen = fake.seen_with("/v1/chat/completions");
+        assert_eq!(seen.len(), 1);
+        assert!(String::from_utf8_lossy(&seen[0].body).contains(r#""stream":false"#));
+    }
+
+    #[tokio::test]
+    async fn events_arrive_one_by_one_and_not_in_one_block() {
+        let fake = Fake::default();
+        fake.set_stream_gap(Duration::from_millis(100));
+        let proxy = proxy_to_fake(&fake, None).await;
+        let start = Instant::now();
+        let resp = proxy.forward(chat(true)).await;
+        assert_eq!(resp.status(), 200);
+        assert_eq!(resp.headers()["content-type"], "text/event-stream");
+        let mut stream = resp.into_body().into_data_stream();
+        let mut arrivals = Vec::new();
+        let mut text = String::new();
+        while let Some(chunk) = stream.next().await {
+            arrivals.push(start.elapsed());
+            text.push_str(&String::from_utf8_lossy(&chunk.unwrap()));
+        }
+        assert!(arrivals.len() >= 5, "got {} chunks", arrivals.len());
+        // The events are 100 ms apart. The first one must come long before the last.
+        let last = *arrivals.last().unwrap();
+        assert!(
+            arrivals[0] + Duration::from_millis(400) < last,
+            "first {:?}, last {last:?}",
+            arrivals[0]
+        );
+        assert!(text.contains("\"reasoning_content\""));
+        assert!(text.trim_end().ends_with("data: [DONE]"));
+    }
+
+    #[tokio::test]
+    async fn a_client_that_leaves_cancels_the_backend_stream() {
+        let fake = Fake::default();
+        fake.set_stream_gap(Duration::from_millis(100));
+        let proxy = proxy_to_fake(&fake, None).await;
+        let resp = proxy.forward(chat(true)).await;
+        let mut stream = resp.into_body().into_data_stream();
+        assert!(stream.next().await.is_some());
+        drop(stream);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while fake.streams_cut() == 0 {
+            assert!(
+                Instant::now() < deadline,
+                "the backend kept generating for a gone client"
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert_eq!(fake.streams_started(), 1);
+    }
+
+    #[tokio::test]
+    async fn the_api_key_is_checked_and_not_sent_to_the_backend() {
+        let fake = Fake::default();
+        let proxy = proxy_to_fake(&fake, Some("secret")).await;
+        let denied = proxy.forward(chat(false)).await;
+        assert_eq!(denied.status(), 401);
+        let v: serde_json::Value = serde_json::from_str(&body_text(denied).await).unwrap();
+        assert_eq!(v["error"]["type"], "authentication_error");
+        assert!(fake.seen().is_empty(), "a denied request must not reach the backend");
+
+        let mut ok = chat(false);
+        ok.headers_mut()
+            .insert(header::AUTHORIZATION, "Bearer secret".parse().unwrap());
+        assert_eq!(proxy.forward(ok).await.status(), 200);
+        let seen = fake.seen_with("/v1/chat/completions");
+        assert!(!seen[0].headers.contains_key("authorization"));
+    }
+
+    #[tokio::test]
+    async fn headers_and_query_strings_are_forwarded_and_hop_headers_are_not() {
+        let fake = Fake::default();
+        let proxy = proxy_to_fake(&fake, None).await;
+        let mut req = request("GET", "/llm/slots?fail_on_no_slot=1", Body::empty());
+        req.headers_mut().insert("x-request-id", "abc".parse().unwrap());
+        req.headers_mut().insert("connection", "keep-alive".parse().unwrap());
+        req.headers_mut().insert("keep-alive", "timeout=5".parse().unwrap());
+        let resp = proxy.forward(req).await;
+        assert_eq!(resp.status(), 200);
+        let seen = fake.seen_with("/slots");
+        assert_eq!(seen[0].target, "/slots?fail_on_no_slot=1");
+        assert_eq!(seen[0].method, "GET");
+        assert_eq!(seen[0].headers.get("x-request-id").map(String::as_str), Some("abc"));
+        assert!(!seen[0].headers.contains_key("keep-alive"));
+        assert!(seen[0].body.is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_error_status_of_the_backend_reaches_the_client() {
+        let fake = Fake::default();
+        fake.set_chat_status(500);
+        let proxy = proxy_to_fake(&fake, None).await;
+        let resp = proxy.forward(chat(false)).await;
+        assert_eq!(resp.status(), 500);
+        let v: serde_json::Value = serde_json::from_str(&body_text(resp).await).unwrap();
+        assert_eq!(v["error"]["message"], "fake failure");
+    }
+
+    #[tokio::test]
+    async fn a_large_request_body_arrives_complete() {
+        let fake = Fake::default();
+        let proxy = proxy_to_fake(&fake, None).await;
+        let big = vec![b'a'; 8 * 1024 * 1024];
+        let resp = proxy.forward(request("POST", "/llm/echo", Body::from(big))).await;
+        assert_eq!(resp.status(), 200);
+        let v: serde_json::Value = serde_json::from_str(&body_text(resp).await).unwrap();
+        assert_eq!(v["bytes"], 8 * 1024 * 1024);
+    }
+
+    #[tokio::test]
+    async fn a_backend_that_is_not_listening_gives_503() {
+        let proxy = LlmProxy::new(closed_port(), None).unwrap();
+        let resp = proxy.forward(chat(false)).await;
+        assert_eq!(resp.status(), 503);
+        let v: serde_json::Value = serde_json::from_str(&body_text(resp).await).unwrap();
+        assert_eq!(v["error"]["type"], "unavailable");
+        assert!(!proxy.healthy().await);
+    }
+
+    #[tokio::test]
+    async fn health_follows_the_backend() {
+        let fake = Fake::default();
+        let proxy = proxy_to_fake(&fake, None).await;
+        assert!(proxy.healthy().await);
+        fake.set_health(HealthMode::Loading);
+        assert!(!proxy.healthy().await, "503 while the model loads");
+        fake.set_health(HealthMode::Ok);
+        assert!(proxy.healthy().await);
+    }
+
+    #[tokio::test]
+    async fn a_hanging_backend_is_not_healthy_after_three_seconds() {
+        let fake = Fake::default();
+        fake.set_health(HealthMode::Hang);
+        let proxy = proxy_to_fake(&fake, None).await;
+        let start = Instant::now();
+        assert!(!proxy.healthy().await);
+        let took = start.elapsed();
+        assert!(
+            took >= Duration::from_secs(3) && took < Duration::from_secs(8),
+            "the probe gave up after {took:?}"
+        );
     }
 }

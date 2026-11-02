@@ -52,6 +52,31 @@ jobs:
       - run: cargo test --locked
       - run: cargo build --locked --release
 
+  # The real llama-server of each engine in the image answers the way the
+  # recordings in tests/fixtures/llm say. A 1 MB model keeps the job small.
+  engine-contract:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [llamacpp, ik]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13'
+      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+      - run: sudo apt-get update -q && sudo apt-get install -y -q libclang-dev libgomp1 cmake
+      - run: ./scripts/fetch-llama-headers.sh
+      # ik_llama.cpp builds from source in about five minutes. The cache key
+      # holds the commit and the build script.
+      - if: matrix.engine == 'ik'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: target/engine-contract/ik-*/build
+          key: ik-${{ hashFiles('docker-bake.hcl', 'scripts/build-ik-llama.sh') }}
+      - run: ./scripts/test-engine-contract.sh ${{ matrix.engine }}
+
   deny:
     runs-on: ubuntu-latest
     steps:

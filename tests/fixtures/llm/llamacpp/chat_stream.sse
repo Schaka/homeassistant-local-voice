@@ -1,0 +1,19 @@
+data: {"choices":[{"finish_reason":null,"index":0,"delta":{"role":"assistant","content":null}}],"created":1793641506,"id":"chatcmpl-YHLmjusKtUUDayyJpQlROuhSSql3khfP","model":"Ling-3.0-tiny-Q4_K_M.gguf","system_fingerprint":"b12032-dde879bc4","object":"chat.completion.chunk"}
+
+data: {"choices":[{"finish_reason":null,"index":0,"delta":{"reasoning_content":"The"}}],"created":1793641506,"id":"chatcmpl-YHLmjusKtUUDayyJpQlROuhSSql3khfP","model":"Ling-3.0-tiny-Q4_K_M.gguf","system_fingerprint":"b12032-dde879bc4","object":"chat.completion.chunk"}
+
+data: {"choices":[{"finish_reason":null,"index":0,"delta":{"reasoning_content":" user"}}],"created":1793641506,"id":"chatcmpl-YHLmjusKtUUDayyJpQlROuhSSql3khfP","model":"Ling-3.0-tiny-Q4_K_M.gguf","system_fingerprint":"b12032-dde879bc4","object":"chat.completion.chunk"}
+
+data: {"choices":[{"finish_reason":null,"index":0,"delta":{"reasoning_content":" wants"}}],"created":1793641506,"id":"chatcmpl-YHLmjusKtUUDayyJpQlROuhSSql3khfP","model":"Ling-3.0-tiny-Q4_K_M.gguf","system_fingerprint":"b12032-dde879bc4","object":"chat.completion.chunk"}
+
+data: {"choices":[{"finish_reason":null,"index":0,"delta":{"reasoning_content":" to"}}],"created":1793641506,"id":"chatcmpl-YHLmjusKtUUDayyJpQlROuhSSql3khfP","model":"Ling-3.0-tiny-Q4_K_M.gguf","system_fingerprint":"b12032-dde879bc4","object":"chat.completion.chunk"}
+
+data: {"choices":[{"finish_reason":null,"index":0,"delta":{"reasoning_content":" turn"}}],"created":1793641506,"id":"chatcmpl-YHLmjusKtUUDayyJpQlROuhSSql3khfP","model":"Ling-3.0-tiny-Q4_K_M.gguf","system_fingerprint":"b12032-dde879bc4","object":"chat.completion.chunk"}
+
+...
+data: {"choices":[{"finish_reason":null,"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"}"}}]}}],"created":1793641507,"id":"chatcmpl-YHLmjusKtUUDayyJpQlROuhSSql3khfP","model":"Ling-3.0-tiny-Q4_K_M.gguf","system_fingerprint":"b12032-dde879bc4","object":"chat.completion.chunk"}
+
+data: {"choices":[{"finish_reason":"tool_calls","index":0,"delta":{}}],"created":1793641507,"id":"chatcmpl-YHLmjusKtUUDayyJpQlROuhSSql3khfP","model":"Ling-3.0-tiny-Q4_K_M.gguf","system_fingerprint":"b12032-dde879bc4","object":"chat.completion.chunk","timings":{"cache_n":268,"prompt_n":4,"prompt_ms":52.081,"prompt_per_token_ms":13.02025,"prompt_per_second":76.80344079414758,"predicted_n":47,"predicted_ms":1067.959,"predicted_per_token_ms":23.2165,"predicted_per_second":43.07281459306958}}
+
+data: [DONE]
+

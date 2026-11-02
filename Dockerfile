@@ -37,6 +37,18 @@ RUN ./scripts/build_linux.sh --backend vulkan --native-cpu OFF \
         --model-set custom --models pocket_tts --target audiocpp_server
 
 # ============================================================================
+# ik_llama.cpp (CPU only) from source, at a pinned commit, as one binary for
+# any CPU with AVX2 and FMA. scripts/build-ik-llama.sh also runs in CI.
+# ============================================================================
+FROM debian:${DEBIAN_VERSION}-slim AS ikllama-builder
+ARG IKLLAMA_COMMIT=35e0be560a755221b8789f667b8aab134a36bc0c
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        git cmake g++ make ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+COPY scripts/build-ik-llama.sh /build-ik-llama.sh
+RUN /build-ik-llama.sh "${IKLLAMA_COMMIT}" /ik_llama.cpp
+
+# ============================================================================
 # parakeet.cpp: prebuilt Vulkan C library from the GitHub release.
 # ============================================================================
 FROM debian:${DEBIAN_VERSION}-slim AS parakeet-stage
@@ -154,8 +166,9 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
 COPY --from=audiocpp-builder /audio.cpp/build/linux-vulkan-release/bin/audiocpp_server /usr/local/bin/audiocpp_server
 COPY --from=parakeet-stage /libparakeet.so /usr/lib/libparakeet.so
 COPY --from=llamacpp-stage /llama.cpp /opt/llama.cpp
+COPY --from=ikllama-builder /ik_llama.cpp/build/bin/llama-server /opt/ik_llama.cpp/llama-server
 # Fail the build here, not at runtime, if a shared library is missing.
-RUN ! ldd /opt/llama.cpp/llama-server /opt/llama.cpp/*.so /usr/local/bin/audiocpp_server /usr/lib/libparakeet.so \
+RUN ! ldd /opt/llama.cpp/llama-server /opt/ik_llama.cpp/llama-server /opt/llama.cpp/*.so /usr/local/bin/audiocpp_server /usr/lib/libparakeet.so \
         | grep 'not found'
 COPY --from=models-stage /models /models
 COPY --from=searxng-stage /opt/searxng /opt/searxng

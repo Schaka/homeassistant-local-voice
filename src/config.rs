@@ -103,14 +103,12 @@ impl Family {
     }
 
     /// Thinking tokens per reply when `LLM_REASONING_BUDGET` is not set.
-    /// Measured with 10 Home Assistant style questions (docs/llm.md): LFM3
-    /// and MiniCPM5 keep their results with these budgets and the patched
-    /// template. Ling thinks briefly anyway. MiniCPM5 at 128 loses quality.
+    /// Ling, MiniCPM5 and LFM3 answer as well with 128 as with 256 or more
+    /// (docs/llm.md), and a larger budget only adds time.
     pub fn default_reasoning_budget(self) -> &'static str {
         match self {
-            Self::Ling3 | Self::Qwen35 | Self::Granite4 => "512",
-            Self::Minicpm5 => "256",
-            Self::Lfm3 => "128",
+            Self::Ling3 | Self::Minicpm5 | Self::Lfm3 => "128",
+            Self::Qwen35 | Self::Granite4 => "512",
         }
     }
 
@@ -130,6 +128,28 @@ impl Family {
         } else {
             None
         }
+    }
+}
+
+/// `LLM_ENGINE`: which program runs the model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EngineChoice {
+    /// The server picks the faster engine for the model and the device.
+    Auto,
+    /// Always llama.cpp.
+    LlamaCpp,
+    /// ik_llama.cpp, whenever the device is the CPU.
+    Ik,
+}
+
+impl EngineChoice {
+    pub fn parse(value: &str) -> Result<Self> {
+        Ok(match value {
+            "auto" => Self::Auto,
+            "llamacpp" => Self::LlamaCpp,
+            "ik" => Self::Ik,
+            other => bail!("unknown LLM_ENGINE={other} (expected auto, llamacpp or ik)"),
+        })
     }
 }
 
@@ -164,7 +184,11 @@ impl Ctx {
 
 #[derive(Debug, Clone)]
 pub struct LlmConfig {
+    /// llama-server of llama.cpp.
     pub server_bin: PathBuf,
+    /// llama-server of ik_llama.cpp.
+    pub ik_bin: PathBuf,
+    pub engine: EngineChoice,
     pub source: LlmSource,
     pub model_name: String,
     pub family: Family,
@@ -186,10 +210,46 @@ pub struct LlmConfig {
 }
 
 impl LlmConfig {
+    /// A complete configuration for tests: Ling-3.0-tiny from a file, CPU only.
+    #[cfg(test)]
+    pub fn for_test() -> Self {
+        Self {
+            server_bin: PathBuf::from("/opt/llama.cpp/llama-server"),
+            ik_bin: PathBuf::from("/opt/ik_llama.cpp/llama-server"),
+            engine: EngineChoice::Auto,
+            source: LlmSource::File(PathBuf::from("/models/llm/Ling-3.0-tiny-Q4_K_M.gguf")),
+            model_name: "Ling-3.0-tiny-Q4_K_M".into(),
+            family: Family::Ling3,
+            device: "none".into(),
+            gpu_layers: "auto".into(),
+            ctx: Ctx::K64,
+            reasoning: true,
+            reasoning_budget: "512".into(),
+            max_tokens: 1024,
+            api_key: None,
+            extra_args: vec![],
+            slot_cache: true,
+            template_fix: true,
+            internal_port: 8081,
+            hf_cache_dir: PathBuf::from("/models/llm/hf"),
+            slot_dir: PathBuf::from("/models/llm/slots"),
+        }
+    }
+
     /// File name of the saved prompt cache. It holds the model and the context
     /// size, because a cache of another model or size cannot be restored.
     pub fn slot_file(&self) -> String {
-        format!("{}-{}.slot", self.model_name, self.ctx.label())
+        self.slot_file_for(crate::llm::engine::EngineKind::LlamaCpp)
+    }
+
+    /// The file of one engine: the formats of the engines differ, so each
+    /// engine reads only its own file.
+    pub fn slot_file_for(&self, engine: crate::llm::engine::EngineKind) -> String {
+        let tag = match engine {
+            crate::llm::engine::EngineKind::LlamaCpp => String::new(),
+            crate::llm::engine::EngineKind::Ik => "-ik".to_owned(),
+        };
+        format!("{}-{}{tag}.slot", self.model_name, self.ctx.label())
             .chars()
             .map(|c| {
                 if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') {
@@ -234,11 +294,37 @@ pub struct YoutubeConfig {
     pub client_version: String,
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Environment of the current test thread. `var` reads only this in tests,
+    /// so tests neither depend on the real environment nor on each other.
+    static TEST_ENV: std::cell::RefCell<std::collections::HashMap<String, String>> = Default::default();
+}
+
+/// Runs `f` with exactly these variables set (tests only).
+#[cfg(test)]
+pub fn with_test_env<T>(vars: &[(&str, &str)], f: impl FnOnce() -> T) -> T {
+    TEST_ENV.with(|e| {
+        *e.borrow_mut() = vars.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect();
+    });
+    let out = f();
+    TEST_ENV.with(|e| e.borrow_mut().clear());
+    out
+}
+
+fn raw_var(name: &str) -> Option<String> {
+    #[cfg(test)]
+    {
+        TEST_ENV.with(|e| e.borrow().get(name).cloned())
+    }
+    #[cfg(not(test))]
+    {
+        env::var(name).ok()
+    }
+}
+
 fn var(name: &str) -> Option<String> {
-    env::var(name)
-        .ok()
-        .map(|v| v.trim().to_owned())
-        .filter(|v| !v.is_empty())
+    raw_var(name).map(|v| v.trim().to_owned()).filter(|v| !v.is_empty())
 }
 
 fn var_or(name: &str, default: &str) -> String {
@@ -360,6 +446,8 @@ impl Config {
         };
         Ok(Some(LlmConfig {
             server_bin: PathBuf::from(var_or("LLAMA_SERVER", "/opt/llama.cpp/llama-server")),
+            ik_bin: PathBuf::from(var_or("IK_LLAMA_SERVER", "/opt/ik_llama.cpp/llama-server")),
+            engine: EngineChoice::parse(&var_or("LLM_ENGINE", "auto"))?,
             source,
             model_name: var("LLM_MODEL_NAME").unwrap_or(default_name),
             family,
@@ -478,31 +566,220 @@ mod tests {
     #[test]
     fn budgets_per_family() {
         assert_eq!(Family::Lfm3.default_reasoning_budget(), "128");
-        assert_eq!(Family::Minicpm5.default_reasoning_budget(), "256");
-        assert_eq!(Family::Ling3.default_reasoning_budget(), "512");
+        assert_eq!(Family::Minicpm5.default_reasoning_budget(), "128");
+        assert_eq!(Family::Ling3.default_reasoning_budget(), "128");
+        assert_eq!(Family::Qwen35.default_reasoning_budget(), "512");
+        assert_eq!(Family::Granite4.default_reasoning_budget(), "512");
     }
 
     #[test]
     fn slot_file_is_sanitized() {
         let cfg = LlmConfig {
-            server_bin: PathBuf::new(),
-            source: LlmSource::HfRepo("x".into()),
             model_name: "Ling 3/tiny:Q4".into(),
-            family: Family::Ling3,
-            device: "none".into(),
-            gpu_layers: "auto".into(),
-            ctx: Ctx::K64,
-            reasoning: true,
-            reasoning_budget: "512".into(),
-            max_tokens: 1024,
-            api_key: None,
-            extra_args: vec![],
-            slot_cache: true,
-            template_fix: true,
-            internal_port: 8081,
-            hf_cache_dir: PathBuf::new(),
-            slot_dir: PathBuf::new(),
+            ..LlmConfig::for_test()
         };
         assert_eq!(cfg.slot_file(), "Ling_3_tiny_Q4-64k.slot");
+    }
+
+    // ---- the LLM variables ----
+
+    fn llm(vars: &[(&str, &str)]) -> Result<Option<LlmConfig>> {
+        with_test_env(vars, Config::llm_from_env)
+    }
+
+    fn err(vars: &[(&str, &str)]) -> String {
+        format!("{:#}", llm(vars).unwrap_err())
+    }
+
+    #[test]
+    fn no_model_means_no_llm() {
+        assert!(llm(&[]).unwrap().is_none());
+        assert!(llm(&[("LLM_FAMILY", "ling3"), ("LLM_CTX", "32k")]).unwrap().is_none());
+        assert!(llm(&[("LLM_HF_REPO", "   ")]).unwrap().is_none(), "blank is unset");
+    }
+
+    #[test]
+    fn defaults_for_a_hugging_face_model() {
+        let c = llm(&[("LLM_HF_REPO", "inclusionAI/Ling-3.0-tiny-GGUF:Q4_K_M")])
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            c.source,
+            LlmSource::HfRepo("inclusionAI/Ling-3.0-tiny-GGUF:Q4_K_M".into())
+        );
+        assert_eq!(c.model_name, "Ling-3.0-tiny-Q4_K_M");
+        assert_eq!(c.family, Family::Ling3);
+        assert_eq!(c.server_bin, PathBuf::from("/opt/llama.cpp/llama-server"));
+        assert_eq!(c.device, "none");
+        assert_eq!(c.gpu_layers, "auto");
+        assert_eq!(c.ctx, Ctx::K64);
+        assert!(c.reasoning);
+        assert_eq!(c.reasoning_budget, "128");
+        assert_eq!(c.max_tokens, 1024);
+        assert_eq!(c.api_key, None);
+        assert!(c.extra_args.is_empty());
+        assert!(c.slot_cache && c.template_fix);
+        assert_eq!(c.internal_port, 8081);
+        assert_eq!(c.hf_cache_dir, PathBuf::from("/models/llm/hf"));
+        assert_eq!(c.slot_dir, PathBuf::from("/models/llm/slots"));
+    }
+
+    #[test]
+    fn a_model_file_lives_in_the_llm_folder() {
+        let c = llm(&[
+            ("LLM_MODEL_FILENAME", "MiniCPM5-2B-Q4_K_M.gguf"),
+            ("LLM_DIR", "/data/llm"),
+        ])
+        .unwrap()
+        .unwrap();
+        assert_eq!(c.source, LlmSource::File("/data/llm/MiniCPM5-2B-Q4_K_M.gguf".into()));
+        assert_eq!(c.model_name, "MiniCPM5-2B-Q4_K_M");
+        assert_eq!(c.family, Family::Minicpm5);
+        assert_eq!(c.reasoning_budget, "128");
+        assert_eq!(c.hf_cache_dir, PathBuf::from("/data/llm/hf"));
+        assert_eq!(c.slot_dir, PathBuf::from("/data/llm/slots"));
+    }
+
+    #[test]
+    fn one_source_only() {
+        let e = err(&[
+            ("LLM_HF_REPO", "a/Ling-3.0-tiny-GGUF"),
+            ("LLM_MODEL_FILENAME", "x.gguf"),
+        ]);
+        assert!(e.contains("not both"), "{e}");
+    }
+
+    #[test]
+    fn the_family_is_detected_or_must_be_set() {
+        let e = err(&[("LLM_MODEL_FILENAME", "mystery-7b.gguf")]);
+        assert!(e.contains("set LLM_FAMILY") && e.contains("mystery-7b.gguf"), "{e}");
+        let c = llm(&[("LLM_MODEL_FILENAME", "mystery-7b.gguf"), ("LLM_FAMILY", "lfm3")])
+            .unwrap()
+            .unwrap();
+        assert_eq!(c.family, Family::Lfm3);
+        assert_eq!(c.reasoning_budget, "128");
+        let e = err(&[("LLM_MODEL_FILENAME", "x.gguf"), ("LLM_FAMILY", "llama")]);
+        assert!(e.contains("unknown LLM_FAMILY=llama"), "{e}");
+    }
+
+    #[test]
+    fn context_sizes_and_the_256k_limit() {
+        let ctx = |family: &str, ctx: &str| {
+            llm(&[
+                ("LLM_MODEL_FILENAME", "x.gguf"),
+                ("LLM_FAMILY", family),
+                ("LLM_CTX", ctx),
+            ])
+        };
+        assert_eq!(ctx("ling3", "256k").unwrap().unwrap().ctx, Ctx::K256);
+        assert_eq!(ctx("lfm3", "256k").unwrap().unwrap().ctx, Ctx::K256);
+        assert_eq!(ctx("minicpm5", "128k").unwrap().unwrap().ctx, Ctx::K128);
+        assert_eq!(ctx("minicpm5", "32k").unwrap().unwrap().ctx, Ctx::K32);
+        assert!(format!("{:#}", ctx("minicpm5", "256k").unwrap_err()).contains("only supported"));
+        assert!(format!("{:#}", ctx("ling3", "16k").unwrap_err()).contains("unknown LLM_CTX=16k"));
+    }
+
+    #[test]
+    fn reasoning_and_its_budget() {
+        let base = [("LLM_MODEL_FILENAME", "Ling-3.0-tiny.gguf")];
+        let with = |extra: &[(&str, &str)]| {
+            let mut v = base.to_vec();
+            v.extend_from_slice(extra);
+            llm(&v)
+        };
+        assert!(!with(&[("LLM_REASONING", "off")]).unwrap().unwrap().reasoning);
+        assert!(with(&[("LLM_REASONING", "on")]).unwrap().unwrap().reasoning);
+        assert!(format!("{:#}", with(&[("LLM_REASONING", "maybe")]).unwrap_err()).contains("expected on or off"));
+        assert_eq!(
+            with(&[("LLM_REASONING_BUDGET", "64")])
+                .unwrap()
+                .unwrap()
+                .reasoning_budget,
+            "64"
+        );
+        // Granite has no thinking mode, whatever the setting says.
+        let g = llm(&[
+            ("LLM_MODEL_FILENAME", "granite-4.0-h-tiny.gguf"),
+            ("LLM_REASONING", "on"),
+        ])
+        .unwrap()
+        .unwrap();
+        assert!(!g.reasoning);
+    }
+
+    #[test]
+    fn the_engine_choice() {
+        let engine = |v: &[(&str, &str)]| {
+            let mut vars = vec![("LLM_MODEL_FILENAME", "Ling-3.0-tiny.gguf")];
+            vars.extend_from_slice(v);
+            llm(&vars)
+        };
+        let c = engine(&[]).unwrap().unwrap();
+        assert_eq!(c.engine, EngineChoice::Auto);
+        assert_eq!(c.ik_bin, PathBuf::from("/opt/ik_llama.cpp/llama-server"));
+        assert_eq!(
+            engine(&[("LLM_ENGINE", "ik")]).unwrap().unwrap().engine,
+            EngineChoice::Ik
+        );
+        assert_eq!(
+            engine(&[("LLM_ENGINE", "llamacpp"), ("IK_LLAMA_SERVER", "/x/ik")])
+                .unwrap()
+                .unwrap()
+                .engine,
+            EngineChoice::LlamaCpp
+        );
+        let c = engine(&[("IK_LLAMA_SERVER", "/x/ik")]).unwrap().unwrap();
+        assert_eq!(c.ik_bin, PathBuf::from("/x/ik"));
+        let e = format!("{:#}", engine(&[("LLM_ENGINE", "vllm")]).unwrap_err());
+        assert!(e.contains("unknown LLM_ENGINE=vllm"), "{e}");
+    }
+
+    #[test]
+    fn each_engine_has_its_own_slot_file() {
+        use crate::llm::engine::EngineKind;
+        let cfg = LlmConfig::for_test();
+        assert_eq!(cfg.slot_file(), "Ling-3.0-tiny-Q4_K_M-64k.slot");
+        assert_eq!(cfg.slot_file_for(EngineKind::LlamaCpp), cfg.slot_file());
+        assert_eq!(cfg.slot_file_for(EngineKind::Ik), "Ling-3.0-tiny-Q4_K_M-64k-ik.slot");
+    }
+
+    #[test]
+    fn the_remaining_llm_variables() {
+        let c = llm(&[
+            ("LLM_MODEL_FILENAME", "Ling-3.0-tiny.gguf"),
+            ("LLAMA_SERVER", "/usr/bin/llama-server"),
+            ("LLM_DEVICE", "Vulkan0"),
+            ("LLM_GPU_LAYERS", "99"),
+            ("LLM_MAX_TOKENS", "0"),
+            ("LLM_API_KEY", " secret "),
+            ("LLM_EXTRA_ARGS", "-fa  off\t--n-cpu-moe 8"),
+            ("LLM_SLOT_CACHE", "off"),
+            ("LLM_TEMPLATE_FIX", "off"),
+            ("LLM_MODEL_NAME", "my-model"),
+        ])
+        .unwrap()
+        .unwrap();
+        assert_eq!(c.server_bin, PathBuf::from("/usr/bin/llama-server"));
+        assert_eq!((c.device.as_str(), c.gpu_layers.as_str()), ("Vulkan0", "99"));
+        assert_eq!(c.max_tokens, 0);
+        assert_eq!(c.api_key.as_deref(), Some("secret"));
+        assert_eq!(c.extra_args, ["-fa", "off", "--n-cpu-moe", "8"]);
+        assert!(!c.slot_cache && !c.template_fix);
+        assert_eq!(c.model_name, "my-model");
+    }
+
+    #[test]
+    fn bad_values_are_errors_that_name_the_variable() {
+        let base = [("LLM_MODEL_FILENAME", "Ling-3.0-tiny.gguf")];
+        for (name, value) in [
+            ("LLM_MAX_TOKENS", "many"),
+            ("LLM_SLOT_CACHE", "yes"),
+            ("LLM_TEMPLATE_FIX", "1"),
+        ] {
+            let mut v = base.to_vec();
+            v.push((name, value));
+            let e = format!("{:#}", llm(&v).unwrap_err());
+            assert!(e.contains(name), "{e}");
+        }
     }
 }

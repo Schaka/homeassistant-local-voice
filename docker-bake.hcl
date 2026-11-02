@@ -72,6 +72,8 @@ variable "STT_MODEL_NAME" { default = "parakeet-ctc-0.6b" }
 # No LLM model is baked by default. Mount one under /models/llm or set
 # LLM_HF_REPO (docs/llm.md).
 variable "LLAMACPP_BUILD" { default = "b12032" }
+# ik_llama.cpp runs the LLM on the CPU, built from this commit (AVX2, no AVX-512).
+variable "IKLLAMA_COMMIT" { default = "35e0be560a755221b8789f667b8aab134a36bc0c" }
 # Pinned sources. The workflow "Bump pins" opens a pull request for each newer
 # upstream version (scripts/bump-pins.sh). Test the image before you merge it.
 variable "AUDIOCPP_COMMIT" { default = "bee4f364b687c34d918048243731d34b091ee7a7" }
@@ -109,6 +111,7 @@ target "final" {
     TTS_VOICE_ID       = "${TTS_VOICE_ID}"
     STT_MODEL_NAME     = "${STT_MODEL_NAME}"
     LLAMACPP_BUILD     = "${LLAMACPP_BUILD}"
+    IKLLAMA_COMMIT     = "${IKLLAMA_COMMIT}"
     AUDIOCPP_COMMIT    = "${AUDIOCPP_COMMIT}"
     PARAKEET_VERSION   = "${PARAKEET_VERSION}"
     SEARXNG_COMMIT     = "${SEARXNG_COMMIT}"

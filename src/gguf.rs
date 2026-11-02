@@ -284,3 +284,21 @@ mod metadata_tests {
         assert_eq!(metadata_string(&path, "missing").unwrap(), None);
     }
 }
+
+/// Writes a GGUF file with string metadata and no tensors (tests only).
+#[cfg(test)]
+pub fn write_test_gguf(path: &Path, kvs: &[(&str, &str)]) {
+    let mut f = Vec::new();
+    f.extend_from_slice(b"GGUF");
+    f.extend_from_slice(&3u32.to_le_bytes());
+    f.extend_from_slice(&0u64.to_le_bytes()); // tensors
+    f.extend_from_slice(&(kvs.len() as u64).to_le_bytes());
+    for (key, value) in kvs {
+        f.extend_from_slice(&(key.len() as u64).to_le_bytes());
+        f.extend_from_slice(key.as_bytes());
+        f.extend_from_slice(&STRING.to_le_bytes());
+        f.extend_from_slice(&(value.len() as u64).to_le_bytes());
+        f.extend_from_slice(value.as_bytes());
+    }
+    std::fs::write(path, f).unwrap();
+}

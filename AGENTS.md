@@ -29,13 +29,13 @@ cargo test --locked
 docker buildx bake final          # the image, the same as CI
 ```
 
-CI runs the first three, a release build and `cargo deny check all`. All must pass.
+CI runs the first three, a release build, `cargo deny check all` and the contract tests of each engine (`scripts/test-engine-contract.sh [ik]`). All must pass.
 
 ### Rules
 
 1. Keep one port and one server. Do not add a web server, a sidecar process or a second container. A new HTTP API is a route in `src/server.rs`. A new LLM tool is an entry in `src/mcp.rs`.
-2. Embed upstream code instead of a rewrite. SearXNG runs as a Python library, llama-server and audiocpp_server run as child processes.
-3. Never start a second llama-server. One model needs 2 to 9 GB.
+2. Embed upstream code instead of a rewrite. SearXNG runs as a Python library. llama-server (of llama.cpp or ik_llama.cpp) and audiocpp_server run as child processes. The LLM server layer (chat templates, tool-call parsers, thinking budget, checkpoints) is not in `libllama`, so it stays in llama-server.
+3. Never run two LLM engines at the same time. One model needs 2 to 9 GB. `src/llm/engine.rs` chooses llama-server of llama.cpp or of ik_llama.cpp at each start.
 4. Keep tool descriptions and tool results short. Each token costs prefill time on a CPU. A search result has 150 to 300 tokens.
 5. Pin every version: crates in `Cargo.lock`, the toolchain in `rust-toolchain.toml` and `docker-bake.hcl`, actions by commit SHA, native engines by release or commit in `docker-bake.hcl`.
 6. `build.rs` generates the llama.cpp bindings at build time from the headers of `LLAMACPP_BUILD` (docker-bake.hcl), the same build as the library in the image. Nothing from llama.cpp is in the repository. Outside the image, run `scripts/fetch-llama-headers.sh` once. After a bump of `LLAMACPP_BUILD`, a changed struct fails the build through the layout checks of bindgen.
@@ -61,7 +61,8 @@ This file and `.agents/skills/` are the instructions for every agent. Write them
 2. A threshold needs negatives in its test set: queries that must find nothing. Without them, every gate looks good.
 3. Native libraries with their own ggml must load with `RTLD_LOCAL`, and only one backend each. `assistant-hub` asks `llama-server --list-devices` for GPUs, because Mesa's software driver is no device for ggml.
 4. Background work that uses the CPU runs on its own thread at nice 10, never on the tokio blocking pool.
-5. Local builds link the Python that PyO3 finds. If that is not the system Python, set `LD_LIBRARY_PATH` to its `lib` folder to run `target/debug/assistant-hub`.
+5. ik_llama.cpp needs `--ctx-checkpoints-tolerance 64` for models with recurrent layers, writes `.checkpoints` and `.tokens.json` next to each saved slot (the cache renames them with the slot file), never answers a restore of a missing file, and chooses its fastest code at compile time. Build it only with `scripts/build-ik-llama.sh` (AVX2, no `-march=native`).
+6. Local builds link the Python that PyO3 finds. If that is not the system Python, set `LD_LIBRARY_PATH` to its `lib` folder to run `target/debug/assistant-hub`.
 
 ## Set up a home
 

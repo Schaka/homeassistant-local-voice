@@ -59,11 +59,13 @@ Set `LLM_HF_REPO` or `LLM_MODEL_FILENAME`, not both. With neither, llama-server 
 | `LLM_MODEL_FILENAME` | empty | Model file that is already in `/models/llm` |
 | `LLM_FAMILY` | empty | `ling3`, `minicpm5`, `lfm3`, `qwen35` or `granite4`. Selects the sampling values and, for `ling3`, the patched chat template. Empty detects the family from the model name. |
 | `LLM_MODEL_NAME` | From the file or repo | Model name that Home Assistant shows |
+| `LLM_ENGINE` | `auto` | The program that runs the model. `auto` uses ik_llama.cpp when the model runs on the CPU, the model is one that [llm.md](llm.md#engines-llamacpp-and-ik_llamacpp) lists, and the CPU has AVX2 and FMA. In every other case it uses llama.cpp. `ik` uses ik_llama.cpp for any model on the CPU. `llamacpp` always uses llama.cpp. |
+| `IK_LLAMA_SERVER` | `/opt/ik_llama.cpp/llama-server` | Path of the ik_llama.cpp server |
 | `LLM_DEVICE` | `none` | `none` runs the LLM on the CPU, which was faster than an Intel iGPU in the tests. `Vulkan0` uses the first GPU. |
 | `LLM_GPU_LAYERS` | `auto` | Layers on the GPU. `auto` fits the model to the free memory. |
 | `LLM_CTX` | `64k` | Context size: `32k`, `64k`, `128k` or `256k`. `256k` is only for `ling3` (YaRN rope scaling) and `lfm3`. |
 | `LLM_REASONING` | `on` | Thinking mode: `on` or `off` |
-| `LLM_REASONING_BUDGET` | Per family: `128` for `lfm3`, `256` for `minicpm5`, `512` for the others | Maximum thinking tokens per reply. `-1` removes the limit. The defaults are measured, see [llm.md](llm.md#speed-settings-per-family). |
+| `LLM_REASONING_BUDGET` | Per family: `128` for `ling3`, `minicpm5` and `lfm3`, `512` for the others | Maximum thinking tokens per reply. `-1` removes the limit. The defaults are measured, see [llm.md](llm.md#speed-settings-per-family). |
 | `LLM_MAX_TOKENS` | `1024` | Limit for the tokens of one reply (`--n-predict`), thinking included. Without a limit, one request can fill the 64k context and hold the only slot for many minutes. `0` removes the limit. A client that sends `max_tokens` overrides it. |
 | `LLM_API_KEY` | empty | Empty accepts any key. With a value, `/llm/...` accepts only `Authorization: Bearer <key>`. llama-server itself listens on 127.0.0.1 without a key. |
 | `LLM_EXTRA_ARGS` | empty | More llama-server arguments, for example `--n-cpu-moe 8`. They come last and override the defaults, also the family defaults (sampling, thinking budget). On a GPU (`LLM_DEVICE=Vulkan0`), set `-fa off` (flash attention off). This is a strong recommendation: with flash attention on, an Intel iGPU prefilled Ling-3.0-tiny 3.7 times slower (79 against 294 tokens/s). For Granite and MiniCPM5, it made no difference. See [igpu-backends.md](igpu-backends.md). |
@@ -119,6 +121,7 @@ The Dockerfile bakes models and pins versions with these arguments. `docker-bake
 | `LLM_MODEL_FILENAME` | empty | File name of the baked LLM |
 | `LLM_FAMILY` | empty | Default of the variable `LLM_FAMILY` |
 | `LLAMACPP_BUILD` | `b12032` | llama.cpp release that the image contains |
+| `IKLLAMA_COMMIT` | `35e0be560a755221b8789f667b8aab134a36bc0c` | ik_llama.cpp commit that the image builds |
 | `SEARXNG_COMMIT` | `10db664f14bc34565d4fd6ca6d846b6f932976aa` | SearXNG commit that the image contains |
 | `AUDIOCPP_COMMIT` | `bee4f364b687c34d918048243731d34b091ee7a7` | audio.cpp commit that the image builds |
 | `PARAKEET_VERSION` | `v0.6.1` | parakeet.cpp release that the image contains |

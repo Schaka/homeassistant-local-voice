@@ -25,6 +25,7 @@ Answer these before you write code:
 | State | A field in `AppState` (`src/server.rs`), built in `run` in `src/main.rs`. Background tasks get the `shutdown` token. |
 | Routes | `src/server.rs`: a handler, the route in `router`, a line in the module comment and an entry in `/health`. Errors use `json_error` with a short code. |
 | Shared helpers | `src/text.rs` for name matching, `src/audio.rs` for PCM. |
+| A change to the LLM engine | `src/llm/engine.rs` (which engine runs), `src/llm/llamacpp.rs` and `src/llm/ik.rs` (the arguments of each), `src/llm/specs.rs` (the spec for each start). The proxy, the prompt cache and the health check know no engine names. |
 
 ## 3. Concurrency rules
 
@@ -58,7 +59,8 @@ Answer these before you write code:
 2. Fake servers with axum for outside services (see `src/media/tests.rs`: paging, ID filters, a WebSocket with tokio-tungstenite). Do not pause tokio time in tests that do network I/O: HTTP timeouts would fire. Make delays adjustable instead.
 3. A fake engine where a model would run (the hashed bag of words in `src/media/tests.rs`).
 4. Ignored tests for real systems, configured with environment variables: `#[ignore = "needs ..."]`, run with `cargo test --release <name> -- --ignored --nocapture`.
-5. For anything with a score or a threshold, an evaluation test on real data (`src/media/eval.rs`): labeled positives, typos, descriptions and negatives (things that must find nothing). Tune thresholds only from its numbers, and write the numbers into the documentation.
+5. For anything that talks to the LLM engine, use the fake llama-server (`src/llm/fake.rs`) and the recordings in `tests/fixtures/llm/`. Add a case to `src/llm/assist.json` when a tool or the prompt changes what the model must do.
+6. For anything with a score or a threshold, an evaluation test on real data (`src/media/eval.rs`): labeled positives, typos, descriptions and negatives (things that must find nothing). Tune thresholds only from its numbers, and write the numbers into the documentation.
 
 ## 8. Documentation
 

@@ -1,0 +1,65 @@
+{
+ "data": [
+  {
+   "created": 1793641610,
+   "id": "Ling-3.0-tiny-Q4_K_M.gguf",
+   "max_model_len": 8192,
+   "meta": {
+    "n_ctx_train": 131072,
+    "n_embd": 1536,
+    "n_params": 7905975712,
+    "n_vocab": 157184,
+    "size": 4830748288,
+    "vocab_type": 2
+   },
+   "object": "model",
+   "owned_by": "llamacpp"
+  }
+ ],
+ "models": [
+  {
+   "additional_speed_tiers": [],
+   "apply_patch_tool_type": null,
+   "auto_compact_token_limit": 7372,
+   "auto_review_model_override": null,
+   "availability_nux": null,
+   "base_instructions": "",
+   "context_window": 8192,
+   "default_reasoning_level": null,
+   "default_reasoning_summary": "auto",
+   "default_service_tier": null,
+   "default_verbosity": null,
+   "description": null,
+   "display_name": "Ling-3.0-tiny-Q4_K_M.gguf",
+   "effective_context_window_percent": 95,
+   "experimental_supported_tools": [],
+   "input_modalities": [
+    "text"
+   ],
+   "max_context_window": 8192,
+   "model_messages": null,
+   "multi_agent_version": null,
+   "priority": 0,
+   "service_tiers": [],
+   "shell_type": "default",
+   "slug": "Ling-3.0-tiny-Q4_K_M.gguf",
+   "support_verbosity": false,
+   "supported_in_api": true,
+   "supported_reasoning_levels": [],
+   "supports_image_detail_original": false,
+   "supports_parallel_tool_calls": false,
+   "supports_reasoning_summaries": false,
+   "supports_search_tool": false,
+   "tool_mode": null,
+   "truncation_policy": {
+    "limit": 8192,
+    "mode": "tokens"
+   },
+   "upgrade": null,
+   "use_responses_lite": false,
+   "visibility": "list",
+   "web_search_tool_type": "text"
+  }
+ ],
+ "object": "list"
+}

@@ -53,6 +53,16 @@ enum Command {
         #[arg(long, default_value = "127.0.0.1:10300")]
         addr: String,
     },
+    /// Print the command line of the LLM engine for the current environment
+    /// as JSON, and prepare its files (chat template, cache folder). Scripts
+    /// use it to start the engine exactly as the server does.
+    #[command(name = "llm-command")]
+    LlmEngine,
+    /// Evaluate a conversation agent with Home Assistant style questions.
+    Eval {
+        #[command(subcommand)]
+        what: EvalCmd,
+    },
     /// Talk to a running server.
     Probe {
         #[arg(long, default_value = "127.0.0.1:10300")]
@@ -60,6 +70,43 @@ enum Command {
         #[command(subcommand)]
         what: Probe,
     },
+}
+
+#[derive(Subcommand)]
+enum EvalCmd {
+    /// Ask the questions of src/llm/assist.json and score the answers.
+    Llm {
+        /// The hub. The questions go to http://ADDR/llm/v1.
+        #[arg(long, default_value = "127.0.0.1:10300")]
+        addr: String,
+        /// An OpenAI compatible /v1 URL instead of the hub, for example an
+        /// engine on its own port.
+        #[arg(long)]
+        base_url: Option<String>,
+        /// Bearer token. Only needed with LLM_API_KEY.
+        #[arg(long)]
+        key: Option<String>,
+        /// Times to ask each question.
+        #[arg(long, default_value_t = 3)]
+        repeat: usize,
+        /// The values that Home Assistant sends. Set the ones of the model.
+        #[arg(long, default_value_t = 0.7)]
+        temperature: f64,
+        #[arg(long, default_value_t = 1.0)]
+        top_p: f64,
+        /// Ask only these question ids.
+        #[arg(long)]
+        only: Vec<String>,
+        /// Seconds to wait for one answer.
+        #[arg(long, default_value_t = 300)]
+        timeout: u64,
+        /// Write the full report as JSON.
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+    /// Decide whether engine B may replace engine A: it must answer as well
+    /// and be faster. Exit code 1 if not.
+    Compare { a: PathBuf, b: PathBuf },
 }
 
 #[derive(Subcommand)]
@@ -112,6 +159,8 @@ fn main() -> ExitCode {
             };
         }
         Command::Healthcheck { addr } => runtime().and_then(|rt| rt.block_on(probe::healthcheck(&addr))),
+        Command::LlmEngine => runtime().and_then(|rt| rt.block_on(print_llm_command())),
+        Command::Eval { what } => return run_eval(what),
         Command::Probe { addr, what } => runtime().and_then(|rt| {
             rt.block_on(async {
                 match what {
@@ -125,6 +174,89 @@ fn main() -> ExitCode {
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            eprintln!("error: {err:#}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+async fn print_llm_command() -> Result<()> {
+    let cfg = Config::from_env()?;
+    let llm_cfg = cfg
+        .llm
+        .context("no LLM is configured (LLM_HF_REPO or LLM_MODEL_FILENAME)")?;
+    let mut setup = llm::specs::setup(&llm_cfg);
+    let (decision, spec) = setup.specs.plan(None).await;
+    println!(
+        "{}",
+        serde_json::json!({
+            "engine": decision.kind.label(),
+            "reason": decision.reason,
+            "program": spec.program,
+            "args": spec.args,
+            "env": spec.env,
+            "env_remove": spec.env_remove,
+            "port": llm_cfg.internal_port,
+        })
+    );
+    Ok(())
+}
+
+fn run_eval(what: EvalCmd) -> ExitCode {
+    let result = match what {
+        EvalCmd::Llm {
+            addr,
+            base_url,
+            key,
+            repeat,
+            temperature,
+            top_p,
+            only,
+            timeout,
+            out,
+        } => runtime().and_then(|rt| {
+            rt.block_on(async {
+                let fx = llm::eval::Fixture::builtin()?;
+                let opts = llm::eval::RunOptions {
+                    base_url: base_url.unwrap_or_else(|| format!("http://{addr}/llm/v1")),
+                    key,
+                    repeat,
+                    temperature,
+                    top_p,
+                    only,
+                    timeout: std::time::Duration::from_secs(timeout),
+                };
+                let report = llm::eval::run(&fx, &opts).await?;
+                llm::eval::print_summary(&report);
+                if let Some(path) = out {
+                    std::fs::write(&path, serde_json::to_string_pretty(&report)?)?;
+                    println!("report: {}", path.display());
+                }
+                Ok(true)
+            })
+        }),
+        EvalCmd::Compare { a, b } => (|| {
+            let read =
+                |p: &PathBuf| -> Result<llm::eval::Report> { Ok(serde_json::from_str(&std::fs::read_to_string(p)?)?) };
+            let verdict = llm::eval::compare(&read(&a)?, &read(&b)?, llm::eval::Gate::default());
+            for line in &verdict.lines {
+                println!("{line}");
+            }
+            println!(
+                "{}",
+                if verdict.pass {
+                    "B may replace A"
+                } else {
+                    "B may not replace A"
+                }
+            );
+            Ok(verdict.pass)
+        })(),
+    };
+    match result {
+        Ok(true) => ExitCode::SUCCESS,
+        Ok(false) => ExitCode::FAILURE,
         Err(err) => {
             eprintln!("error: {err:#}");
             ExitCode::FAILURE
@@ -220,17 +352,22 @@ async fn run(cfg: Config) -> Result<bool> {
     let mut slot_cache = None;
     let llm_proxy = match &cfg.llm {
         Some(llm_cfg) => {
-            let (spec, slots_usable) = llm::child_spec(llm_cfg).await;
-            let llama_starts = spec.starts.clone();
-            supervised.push(supervisor::spawn(spec, children.clone()));
+            let llm::specs::Setup {
+                specs,
+                slots_usable,
+                active,
+                starts,
+            } = llm::specs::setup(llm_cfg);
+            supervised.push(supervisor::spawn_source(specs, children.clone()));
             if slots_usable {
                 let cache = llm::slots::SlotCache::new(
                     llm_cfg.internal_port,
                     llm_cfg.slot_dir.clone(),
                     llm_cfg.slot_file(),
-                    llama_starts,
+                    starts,
                     Duration::from_secs(5),
-                )?;
+                )?
+                .per_engine(active, llm_cfg.slot_file_for(llm::engine::EngineKind::Ik));
                 tokio::spawn(cache.clone().run(shutdown.clone()));
                 slot_cache = Some(cache);
             }

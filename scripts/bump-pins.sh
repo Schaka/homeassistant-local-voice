@@ -8,7 +8,7 @@
 #   scripts/bump-pins.sh                    # update all pins in the working tree
 #   scripts/bump-pins.sh llamacpp parakeet  # update only these components
 #
-# Components: llamacpp, audiocpp, parakeet, searxng. The Rust toolchain and
+# Components: llamacpp, ikllama, audiocpp, parakeet, searxng. The Rust toolchain and
 # cargo-chef are not handled here (skill bump-native-engine).
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -16,11 +16,12 @@ cd "$(dirname "$0")/.."
 check=0
 if [ "${1:-}" = "--check" ]; then check=1; shift; fi
 components=("$@")
-if [ ${#components[@]} -eq 0 ]; then components=(llamacpp audiocpp parakeet searxng); fi
+if [ ${#components[@]} -eq 0 ]; then components=(llamacpp ikllama audiocpp parakeet searxng); fi
 
 variable() {
   case "$1" in
     llamacpp) echo LLAMACPP_BUILD ;;
+    ikllama) echo IKLLAMA_COMMIT ;;
     audiocpp) echo AUDIOCPP_COMMIT ;;
     parakeet) echo PARAKEET_VERSION ;;
     searxng) echo SEARXNG_COMMIT ;;
@@ -44,6 +45,7 @@ latest() {
         [.[] | select(.draft | not) | select(.prerelease | not)
              | select(any(.assets[]; .name | endswith("-lib-linux-vulkan-x64.tar.gz")))
              | .tag_name] | first // empty' ;;
+    ikllama) gh api repos/ikawrakow/ik_llama.cpp/commits/HEAD --jq .sha ;;
     audiocpp) gh api repos/0xShug0/audio.cpp/commits/HEAD --jq .sha ;;
     searxng) gh api repos/searxng/searxng/commits/HEAD --jq .sha ;;
   esac

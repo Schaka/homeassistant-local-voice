@@ -1,0 +1,9 @@
+{
+ "filename": "fixture.bin",
+ "id_slot": 0,
+ "n_read": 62809108,
+ "n_restored": 318,
+ "timings": {
+  "restore_ms": 7.817
+ }
+}

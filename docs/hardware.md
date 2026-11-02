@@ -64,7 +64,7 @@ A 4th-generation Core CPU has about half the speed per core for this work (estim
 
 ## Measured: the LLM
 
-Ling-3.0-tiny Q4_K_M (7.9B parameters, 1.3B active per token), a voice prompt of 5,800 tokens. Intel Core i5-12400T, 32 GB RAM.
+Ling-3.0-tiny Q4_K_M (7.9B parameters, 1.3B active per token), a voice prompt of 5,800 tokens. Intel Core i5-12400T, 32 GB RAM. These numbers are from llama.cpp (`LLM_ENGINE=llamacpp`). On the CPU, the server uses ik_llama.cpp for this model, which reads the prompt about twice as fast on a Core Ultra 7 270K Plus ([llm.md](llm.md#engines-llamacpp-and-ik_llamacpp)). It was not measured on this CPU.
 
 | Device | Prompt (prefill) | Reply (generation) | Answer time with the prompt cache |
 |---|---|---|---|

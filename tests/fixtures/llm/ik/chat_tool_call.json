@@ -1,0 +1,47 @@
+{
+ "choices": [
+  {
+   "finish_reason": "tool_calls",
+   "index": 0,
+   "message": {
+    "content": "",
+    "reasoning_content": "The user wants to turn on the kitchen light. I need to use the HASSTurnOn function with the name \"light.kitchen\".",
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "function": {
+       "arguments": "{\"name\":\"light.kitchen\"}",
+       "name": "HassTurnOn"
+      },
+      "id": "d9YEd2FeqeIb4xJlbNvW3tjTlqdgwNX2",
+      "type": "function"
+     }
+    ]
+   }
+  }
+ ],
+ "created": 1793641612,
+ "id": "chatcmpl-iGvKdneHs6YIF04b0CBUBDLQlgRX2d8k",
+ "model": "Ling-3.0-tiny-Q4_K_M.gguf",
+ "object": "chat.completion",
+ "timings": {
+  "n_ctx": 8192,
+  "n_past": 318,
+  "predicted_ms": 692.999,
+  "predicted_n": 47,
+  "predicted_per_second": 67.82116568710777,
+  "predicted_per_token_ms": 14.744659574468086,
+  "prompt_ms": 714.885,
+  "prompt_n": 272,
+  "prompt_per_second": 380.48077662840876,
+  "prompt_per_token_ms": 2.6282536764705884
+ },
+ "usage": {
+  "completion_tokens": 47,
+  "prompt_tokens": 272,
+  "prompt_tokens_details": {
+   "cached_tokens": 0
+  },
+  "total_tokens": 319
+ }
+}

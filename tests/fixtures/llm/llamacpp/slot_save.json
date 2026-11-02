@@ -1,0 +1,9 @@
+{
+ "filename": "fixture.bin",
+ "id_slot": 0,
+ "n_saved": 318,
+ "n_written": 62809108,
+ "timings": {
+  "save_ms": 6.919
+ }
+}

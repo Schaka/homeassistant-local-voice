@@ -114,6 +114,7 @@ pub fn child_spec(cfg: &TtsConfig) -> Result<ChildSpec> {
             timeout: Duration::from_secs(10),
             failures: 4,
         }),
+        restart_when_healthy: false,
     })
 }
 

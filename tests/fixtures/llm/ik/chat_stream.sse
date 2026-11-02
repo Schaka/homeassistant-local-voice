@@ -1,0 +1,19 @@
+data: {"choices":[{"finish_reason":null,"index":0,"delta":{"role":"assistant","content":null}}],"created":1793641612,"id":"chatcmpl-2c8UYlXM6evGrfadpqF5ozug54hMUFeM","model":"Ling-3.0-tiny-Q4_K_M.gguf","object":"chat.completion.chunk"}
+
+data: {"choices":[{"finish_reason":null,"index":0,"delta":{"reasoning_content":"The"}}],"created":1793641612,"id":"chatcmpl-2c8UYlXM6evGrfadpqF5ozug54hMUFeM","model":"Ling-3.0-tiny-Q4_K_M.gguf","object":"chat.completion.chunk"}
+
+data: {"choices":[{"finish_reason":null,"index":0,"delta":{"reasoning_content":" user"}}],"created":1793641612,"id":"chatcmpl-2c8UYlXM6evGrfadpqF5ozug54hMUFeM","model":"Ling-3.0-tiny-Q4_K_M.gguf","object":"chat.completion.chunk"}
+
+data: {"choices":[{"finish_reason":null,"index":0,"delta":{"reasoning_content":" wants"}}],"created":1793641612,"id":"chatcmpl-2c8UYlXM6evGrfadpqF5ozug54hMUFeM","model":"Ling-3.0-tiny-Q4_K_M.gguf","object":"chat.completion.chunk"}
+
+data: {"choices":[{"finish_reason":null,"index":0,"delta":{"reasoning_content":" to"}}],"created":1793641612,"id":"chatcmpl-2c8UYlXM6evGrfadpqF5ozug54hMUFeM","model":"Ling-3.0-tiny-Q4_K_M.gguf","object":"chat.completion.chunk"}
+
+data: {"choices":[{"finish_reason":null,"index":0,"delta":{"reasoning_content":" turn"}}],"created":1793641612,"id":"chatcmpl-2c8UYlXM6evGrfadpqF5ozug54hMUFeM","model":"Ling-3.0-tiny-Q4_K_M.gguf","object":"chat.completion.chunk"}
+
+...
+data: {"choices":[{"finish_reason":null,"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"}"}}]}}],"created":1793641612,"id":"chatcmpl-2c8UYlXM6evGrfadpqF5ozug54hMUFeM","model":"Ling-3.0-tiny-Q4_K_M.gguf","object":"chat.completion.chunk"}
+
+data: {"choices":[{"finish_reason":"tool_calls","index":0,"delta":{}}],"created":1793641612,"id":"chatcmpl-2c8UYlXM6evGrfadpqF5ozug54hMUFeM","model":"Ling-3.0-tiny-Q4_K_M.gguf","object":"chat.completion.chunk","timings":{"prompt_n":5,"prompt_ms":34.998,"prompt_per_token_ms":6.999599999999999,"prompt_per_second":142.86530658894796,"predicted_n":47,"predicted_ms":710.435,"predicted_per_token_ms":15.115638297872339,"predicted_per_second":66.15665050286093,"n_ctx":8192,"n_past":318}}
+
+data: [DONE]
+
