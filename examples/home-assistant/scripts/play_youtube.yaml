@@ -8,7 +8,8 @@
 # The box opens the video in TizenTube, else SmartTube, else the YouTube app.
 # The step "TV on over HDMI-CEC" works on boxes with an Amlogic chip and a root
 # ADB shell (for example the Ugoos AM6B+). Remove it on other boxes, or turn
-# the TV on in another way.
+# the TV on in another way. A box without root can wake the TV with
+# remote.turn_on of the "Android TV Remote" integration (docs/android-tv-control.md).
 alias: Play on YouTube
 description: >-
   Plays a YouTube video on the TV and turns the TV on. Use it when the user wants to watch

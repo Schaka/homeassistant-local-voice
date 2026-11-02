@@ -114,6 +114,8 @@ A trigger can also hand the sentence to the LLM. [automations/voice_play_video.y
 
 The script tries TizenTube, SmartTube and the YouTube app, in this order. Boxes with an Amlogic chip (for example the Ugoos AM6B+) can also turn the TV on and off over HDMI-CEC from the box. The script has these commands as an optional step. [scripts/tv_off.yaml](../examples/home-assistant/scripts/tv_off.yaml) turns the TV off in an order that keeps it off.
 
+[android-tv-control.md](android-tv-control.md) explains how to control a box without root: the approval of the key, wake and standby, starting a named app, and one script for several rooms.
+
 ## 11. Ideas for automations
 
 | Idea | How | Example |

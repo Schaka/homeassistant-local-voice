@@ -66,6 +66,7 @@ Without a GPU, leave out the `--device` and `--group-add` lines. Speech then run
 | [docs/home-assistant.md](docs/home-assistant.md) | Home Assistant setup step by step: speech, agent, tools, sentence triggers, YouTube, ideas for automations |
 | [examples/](examples/) | Tested Home Assistant files: prompt, tool scripts, automations |
 | [AGENTS.md](AGENTS.md) | Instructions for AI agents: work on the code, or set up a home through the Home Assistant API |
+| [docs/android-tv-control.md](docs/android-tv-control.md) | Control an Android TV box without root: ADB, Android TV Remote, start a named app, wake and standby |
 | [docs/media-index.md](docs/media-index.md) | The media index: search stages, the gate, sync with Jellyfin, resources, evaluation |
 | [docs/architecture.md](docs/architecture.md) | The server, its routes, the child processes, the build and CI |
 | [docs/voice.md](docs/voice.md) | STT and TTS: models, other languages and voices, GPU notes, test clients |
