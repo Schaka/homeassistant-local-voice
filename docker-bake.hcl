@@ -74,9 +74,9 @@ variable "STT_MODEL_NAME" { default = "parakeet-ctc-0.6b" }
 variable "LLAMACPP_BUILD" { default = "b12032" }
 # Pinned sources. The workflow "Bump pins" opens a pull request for each newer
 # upstream version (scripts/bump-pins.sh). Test the image before you merge it.
-variable "AUDIOCPP_COMMIT" { default = "c0cd77fa80285f8113883e0de06ffc781cf502f6" }
+variable "AUDIOCPP_COMMIT" { default = "bee4f364b687c34d918048243731d34b091ee7a7" }
 variable "PARAKEET_VERSION" { default = "v0.6.1" }
-variable "SEARXNG_COMMIT" { default = "9ded3bec1ae0b92e6abe40d27e1ca38d1906abbe" }
+variable "SEARXNG_COMMIT" { default = "10db664f14bc34565d4fd6ca6d846b6f932976aa" }
 # Keep in sync with rust-toolchain.toml.
 variable "RUST_VERSION" { default = "1.99.1" }
 # cargo-chef image tag: <CARGO_CHEF_VERSION>-rust-<RUST_VERSION>-slim-trixie.
