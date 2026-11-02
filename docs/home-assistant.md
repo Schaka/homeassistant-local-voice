@@ -140,4 +140,4 @@ The script tries TizenTube, SmartTube and the YouTube app, in this order. Boxes 
 | The satellite stays in "listening" | Set "Finished speaking detection" to "default". Check the container log for an `STT` line. |
 | The model reads markdown aloud | The server removes most markdown before TTS. Add "no markdown, no lists" to the prompt. |
 | Wrong words in the transcript | Use a TDT model ([voice.md](voice.md#measured-stt-accuracy)). Set `STT_DEBUG_DIR` to keep the recordings and compare models. |
-| `/health` shows `"status": "degraded"` | STT failed to load, TTS does not answer, or llama-server does not answer (then `"llm": "unavailable"`). The container log names the cause. The child processes are probed every 30 s and a hung one is restarted. |
+| `/health` shows `"status": "degraded"` | STT did not load, TTS does not answer, or llama-server does not answer (then `"llm": "unavailable"`). The container log names the cause. The hub probes the child processes every 30 s and restarts a hung one. |

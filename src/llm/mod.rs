@@ -124,8 +124,8 @@ pub fn server_args(cfg: &LlmConfig, slot_cache: bool, offline: bool, template: O
     }
     if cfg.max_tokens > 0 {
         // A broken chat template or a tool-call loop must not generate until
-        // the whole context is full: that holds the only slot for a long time.
-        // A client that sends `max_tokens` still overrides this default.
+        // the whole context is full. That holds the only slot for a long time.
+        // A client that sends `max_tokens` overrides this default.
         args.extend([s("--n-predict"), cfg.max_tokens.to_string()]);
     }
     if slot_cache {

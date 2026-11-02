@@ -13,7 +13,9 @@ The container runs one Rust server, `assistant-hub`, on one port (10300). It is 
 | LLM: llama-server | Child process. It starts only with a model setting. | 127.0.0.1:8081 |
 | Media index: EmbeddingGemma 2 | Inside `assistant-hub`, through the C API of `libllama.so`, on the CPU. Only with `MEDIA_INDEX=on`. | none |
 
-At start, `assistant-hub` asks `llama-server --list-devices` for the Vulkan GPUs. Without one, STT and TTS run on the CPU. Then it starts the child processes and restarts them 2 s after they exit. It also probes `/health` of both children every 30 s: a child that exits is restarted at once, but a child that hangs keeps its port open and never exits. After four failed probes in a row (about two minutes) the hub stops it, and the normal restart starts a fresh engine. A start that has not answered yet is loading its model, so failed probes only count after a grace period. On SIGTERM it saves the prompt cache of llama-server, stops the children and exits. A stop takes less than a second.
+At start, `assistant-hub` asks `llama-server --list-devices` for the Vulkan GPUs. Without one, STT and TTS run on the CPU. Then it starts the child processes and restarts them 2 s after they exit. On SIGTERM it saves the prompt cache of llama-server, stops the children and exits. A stop takes less than a second.
+
+The hub also probes `/health` of both children every 30 s. A child that exits is restarted at once. A child that hangs keeps its port open and never exits, so only a probe can find it. After four failed probes in a row, the hub stops the child and the normal restart starts a fresh engine. A start that has not answered yet is loading its model. As a result, failed probes only count after a grace period.
 
 ## One port
 
@@ -28,7 +30,7 @@ A client that sends nothing for 30 s is dropped.
 
 | Route | Purpose |
 |---|---|
-| `GET /health` | Status of STT, TTS, LLM, web search and YouTube search. STT and TTS are probed directly, the LLM through `/health` of llama-server. The answer is 503 unless `status` is `ok`; the Docker health check uses it (`assistant-hub healthcheck`). |
+| `GET /health` | Status of STT, TTS, LLM, web search and YouTube search. The hub probes STT and TTS directly and the LLM through `/health` of llama-server. The answer is 503 unless `status` is `ok`. The Docker health check uses it (`assistant-hub healthcheck`). |
 | `/llm/...` | Forwarded to llama-server without the `/llm` prefix. `/llm/v1/chat/completions` becomes `/v1/chat/completions`. Bodies stream in both directions, so server-sent events arrive token by token. With `LLM_API_KEY`, the server checks the key itself. |
 | `POST /mcp` | MCP server (Streamable HTTP, JSON responses) with all tools. A new tool is one more entry in `src/mcp.rs`, not a new endpoint. |
 | `GET /web/search?q=...&max_results=3` | Web search as JSON: the query as sent, the text that the MCP tool returns, and the results. |
@@ -70,7 +72,7 @@ STT and TTS share one GPU lock, so they never run on the GPU at the same time. T
 | `assistant-hub probe tts "TEXT" OUT.wav` | Synthesize a WAV file |
 | `assistant-hub probe llm "TEXT" [--devices 100]` | One chat request with a Home Assistant tool to `/llm/v1`: reply, tool calls, prompt and generation speed |
 | `assistant-hub verify-gguf FILE...` | Check model files |
-| `assistant-hub healthcheck` | Checks `/health`. Exit code 0 means the answer is 200 and `status` is `ok`. |
+| `assistant-hub healthcheck` | Calls `/health`. Exit code 0 means the answer is 200 and `status` is `ok`. |
 
 All of them take `--addr host:port` (default `127.0.0.1:10300`). In the container: `docker exec <name> assistant-hub probe describe`.
 

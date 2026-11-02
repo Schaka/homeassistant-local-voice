@@ -189,7 +189,7 @@ pub async fn llm(addr: &str, prompt: &str, devices: usize, key: Option<&str>) ->
 }
 
 /// GET /health over plain TCP. Exit code 0 only when the server answers 200
-/// *and* reports `"status": "ok"`.
+/// and reports `"status": "ok"`.
 pub async fn healthcheck(addr: &str) -> Result<()> {
     let mut stream = tokio::time::timeout(Duration::from_secs(5), TcpStream::connect(addr)).await??;
     stream

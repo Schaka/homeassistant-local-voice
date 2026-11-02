@@ -108,7 +108,7 @@ pub fn child_spec(cfg: &TtsConfig) -> Result<ChildSpec> {
         starts: Default::default(),
         health: Some(Health {
             url: format!("http://127.0.0.1:{}/health", cfg.internal_port),
-            // The model loads lazily, the server itself answers early.
+            // The model loads lazily. The server itself answers early.
             start_grace: Duration::from_secs(120),
             interval: Duration::from_secs(30),
             timeout: Duration::from_secs(10),

@@ -173,8 +173,8 @@ pub struct LlmConfig {
     pub ctx: Ctx,
     pub reasoning: bool,
     pub reasoning_budget: String,
-    /// Upper bound for the tokens of one reply (`--n-predict`). 0 means no
-    /// bound, which lets a degenerate generation fill the whole context.
+    /// Limit for the tokens of one reply (`--n-predict`). A value of 0
+    /// removes the limit. A bad generation can then fill the whole context.
     pub max_tokens: u32,
     pub api_key: Option<String>,
     pub extra_args: Vec<String>,

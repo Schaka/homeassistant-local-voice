@@ -12,10 +12,10 @@ use std::time::Duration;
 use tokio::sync::{Mutex, OwnedMutexGuard};
 use tokio_util::sync::CancellationToken;
 
-/// Signatures of a dead GPU (amdgpu reset, VK_ERROR_DEVICE_LOST). A timeout of
-/// the TTS engine belongs here too: a GPU that no longer runs kernels leaves
-/// audiocpp_server waiting forever. When they pile up, neither engine recovers
-/// on its own.
+/// Signs of a dead GPU (amdgpu reset, VK_ERROR_DEVICE_LOST). A timeout of the
+/// TTS engine is also a sign: a GPU that stops running kernels leaves
+/// audiocpp_server waiting forever. After three of these signs, neither engine
+/// recovers on its own.
 const FAULT_SIGNS: &[&str] = &[
     "device lost",
     "devicelost",

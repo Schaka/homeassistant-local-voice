@@ -14,17 +14,16 @@ use tokio::process::{Child, Command};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-/// A periodic liveness probe for a child process.
+/// A health probe that runs at a fixed interval.
 ///
 /// A child that exits is restarted at once. A child that hangs keeps its port
-/// open and never exits, so only a probe can notice it. This is the case that
-/// left the voice pipeline silent for hours while Docker still saw a healthy
-/// container.
+/// open and never exits, so only a probe can find it. This fault left the
+/// voice pipeline silent for hours while Docker saw a healthy container.
 #[derive(Debug, Clone)]
 pub struct Health {
     /// `GET` this URL. Any 2xx answer means the child is alive.
     pub url: String,
-    /// A start that has not answered *yet* is loading its model. Failed
+    /// A start that has not answered yet is loading its model. Failed
     /// probes only count after this, so a first model download is not a hang.
     pub start_grace: Duration,
     pub interval: Duration,
