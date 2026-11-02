@@ -7,9 +7,10 @@ pub mod template;
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::time::Duration;
 
 use crate::config::{Ctx, Family, LlmConfig, LlmSource};
-use crate::supervisor::ChildSpec;
+use crate::supervisor::{ChildSpec, Health};
 
 fn s(v: &str) -> String {
     v.to_owned()
@@ -120,6 +121,12 @@ pub fn server_args(cfg: &LlmConfig, slot_cache: bool, offline: bool, template: O
         ]);
     } else {
         args.extend([s("--reasoning"), s("off")]);
+    }
+    if cfg.max_tokens > 0 {
+        // A broken chat template or a tool-call loop must not generate until
+        // the whole context is full: that holds the only slot for a long time.
+        // A client that sends `max_tokens` still overrides this default.
+        args.extend([s("--n-predict"), cfg.max_tokens.to_string()]);
     }
     if slot_cache {
         args.extend([s("--slot-save-path"), cfg.slot_dir.display().to_string()]);
@@ -297,6 +304,15 @@ pub async fn child_spec(cfg: &LlmConfig) -> (ChildSpec, bool) {
         // The hub checks the API key itself. llama-server listens on 127.0.0.1 only.
         env_remove: vec![s("LLAMA_API_KEY")],
         starts: Default::default(),
+        health: Some(Health {
+            url: format!("http://127.0.0.1:{}/health", cfg.internal_port),
+            // The first start downloads the model. llama-server answers 503
+            // while it loads, so a missing answer only counts after this.
+            start_grace: Duration::from_secs(900),
+            interval: Duration::from_secs(30),
+            timeout: Duration::from_secs(10),
+            failures: 4,
+        }),
     };
     (spec, slot_cache)
 }
@@ -317,6 +333,7 @@ mod tests {
             ctx: Ctx::K64,
             reasoning: true,
             reasoning_budget: "512".into(),
+            max_tokens: 1024,
             api_key: None,
             extra_args: vec!["--n-cpu-moe".into(), "8".into()],
             slot_cache: true,
@@ -339,7 +356,7 @@ mod tests {
             "-hf inclusionAI/Ling-3.0-tiny-GGUF:Q4_K_M --no-mmproj --offline \
              --alias Ling-3.0-tiny-Q4_K_M --host 127.0.0.1 --port 8081 --no-ui \
              --device none -ngl auto -c 65536 --jinja --reasoning on --reasoning-budget 512 \
-             --slot-save-path /models/llm/slots --temp 1.0 --top-p 0.95 --top-k 20 \
+             --n-predict 1024 --slot-save-path /models/llm/slots --temp 1.0 --top-p 0.95 --top-k 20 \
              --chat-template-file /tmp/chat-template-x.jinja --n-cpu-moe 8"
         );
     }
@@ -352,7 +369,7 @@ mod tests {
         c.extra_args.clear();
         let args = server_args(&c, false, false, None).join(" ");
         assert!(args.starts_with("-m /models/llm/g.gguf --alias"));
-        assert!(args.contains("-c 131072 --jinja --reasoning off --temp 0.0"));
+        assert!(args.contains("-c 131072 --jinja --reasoning off --n-predict 1024 --temp 0.0"));
         assert!(!args.contains("slot-save-path"));
     }
 

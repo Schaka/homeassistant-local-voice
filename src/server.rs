@@ -75,22 +75,32 @@ async fn health(State(app): State<Shared>) -> Response {
     let tts = app.voice.tts.healthy().await;
     let llm = match &app.llm {
         None => "off",
-        Some(_) => "on",
+        Some(proxy) if proxy.healthy().await => "ok",
+        Some(_) => "unavailable",
     };
     let stt = app.voice.stt.is_some();
-    // 200 in both cases: the container stays up, and the supervisor restarts
-    // a dead TTS engine. "degraded" tells a person where to look.
-    axum::Json(json!({
-        "status": if stt && tts { "ok" } else { "degraded" },
-        "stt": stt,
-        "tts": tts,
-        "llm": llm,
-        "web_search": app.web_search.is_some(),
-        "youtube": app.youtube.is_some(),
-        "jellyfin": app.jellyfin.is_some(),
-        "media_index": app.media.as_ref().map_or(json!("off"), |m| json!(m.state())),
-    }))
-    .into_response()
+    // 503 when a configured part does not answer. The supervisor restarts a
+    // hung engine, but the container must say so until that happens.
+    let ok = stt && tts && llm != "unavailable";
+    let code = if ok {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+    (
+        code,
+        axum::Json(json!({
+            "status": if ok { "ok" } else { "degraded" },
+            "stt": stt,
+            "tts": tts,
+            "llm": llm,
+            "web_search": app.web_search.is_some(),
+            "youtube": app.youtube.is_some(),
+            "jellyfin": app.jellyfin.is_some(),
+            "media_index": app.media.as_ref().map_or(json!("off"), |m| json!(m.state())),
+        })),
+    )
+        .into_response()
 }
 
 async fn llm(State(app): State<Shared>, req: Request<Body>) -> Response {
@@ -377,28 +387,28 @@ mod tests {
         }
     }
 
-    struct FakeTts;
+    struct FakeTts(bool);
     impl TextToSpeech for FakeTts {
         fn synthesize<'a>(&'a self, text: &'a str, _voice: Option<&'a str>) -> BoxFuture<'a, anyhow::Result<Bytes>> {
             let samples = vec![0i16; text.len() * 1000];
             Box::pin(async move { Ok(Bytes::from(crate::audio::wav_bytes(&samples, 24_000, 1))) })
         }
         fn healthy(&self) -> BoxFuture<'_, bool> {
-            Box::pin(async { true })
+            Box::pin(async move { self.0 })
         }
     }
 
-    async fn start() -> (SocketAddr, CancellationToken) {
+    async fn start_with(tts_healthy: bool, llm: Option<LlmProxy>) -> (SocketAddr, CancellationToken) {
         let voice = Arc::new(Voice {
             stt: Some(Arc::new(FakeStt)),
-            tts: Arc::new(FakeTts),
+            tts: Arc::new(FakeTts(tts_healthy)),
             gpu: crate::gpu::Gpu::new(CancellationToken::new()),
             info: crate::wyoming::info("stt-model", "alba", &["en".to_owned()]),
             debug_dir: None,
         });
         let state = Arc::new(AppState {
             voice,
-            llm: None,
+            llm,
             tools: Tools::default(),
             web_search: None,
             youtube: None,
@@ -410,6 +420,10 @@ mod tests {
         let shutdown = CancellationToken::new();
         tokio::spawn(run(listener, state, shutdown.clone()));
         (addr, shutdown)
+    }
+
+    async fn start() -> (SocketAddr, CancellationToken) {
+        start_with(true, None).await
     }
 
     #[tokio::test]
@@ -465,6 +479,39 @@ mod tests {
         assert_eq!(kinds.first().map(String::as_str), Some("audio-start"));
         // speakable("**Hi** there") is "Hi there." (9 chars): 9000 samples of 2 bytes.
         assert_eq!(bytes, 18_000);
+        shutdown.cancel();
+    }
+
+    #[tokio::test]
+    async fn health_is_ok_without_llm() {
+        let (addr, shutdown) = start().await;
+        let resp = reqwest::get(format!("http://{addr}/health")).await.unwrap();
+        assert_eq!(resp.status(), 200);
+        let health: Value = resp.json().await.unwrap();
+        assert_eq!(health["status"], "ok");
+        assert_eq!(health["tts"], true);
+        assert_eq!(health["llm"], "off");
+        shutdown.cancel();
+    }
+
+    #[tokio::test]
+    async fn health_fails_when_an_engine_does_not_answer() {
+        // Port 1 has no listener: llama-server is configured but unreachable.
+        let llm = LlmProxy::new(1, None).unwrap();
+        let (addr, shutdown) = start_with(true, Some(llm)).await;
+        let resp = reqwest::get(format!("http://{addr}/health")).await.unwrap();
+        assert_eq!(resp.status(), 503);
+        let health: Value = resp.json().await.unwrap();
+        assert_eq!(health["status"], "degraded");
+        assert_eq!(health["llm"], "unavailable");
+        shutdown.cancel();
+
+        let (addr, shutdown) = start_with(false, None).await;
+        let resp = reqwest::get(format!("http://{addr}/health")).await.unwrap();
+        assert_eq!(resp.status(), 503);
+        let health: Value = resp.json().await.unwrap();
+        assert_eq!(health["status"], "degraded");
+        assert_eq!(health["tts"], false);
         shutdown.cancel();
     }
 }

@@ -167,7 +167,7 @@ Measured on 2026-11-01 with 10 Home Assistant style questions: a question, a too
 | Ling-3.0-tiny Q4_K_M | Fix, budget 512 (default) | 9 of 10 | 2.9 s |
 | Ling-3.0-tiny Q4_K_M | Fix, budget 128 | 9 of 10 | 3.3 s |
 
-So the defaults of `LLM_REASONING_BUDGET` are 128 for `lfm3`, 256 for `minicpm5` and 512 for the others. Set the variable, or `--reasoning-budget` in `LLM_EXTRA_ARGS`, to choose another value. The question that all models got wrong was "turn off all the lights downstairs": they switched one room instead of the floor. The prompt of Home Assistant, with floors and areas, helps there.
+So the defaults of `LLM_REASONING_BUDGET` are 128 for `lfm3`, 256 for `minicpm5` and 512 for the others. Set the variable, or `--reasoning-budget` in `LLM_EXTRA_ARGS`, to choose another value. `LLM_MAX_TOKENS` (default 1024) caps the whole reply with `--n-predict`, so a template that never closes its thinking block cannot generate until the 64k context is full. The question that all models got wrong was "turn off all the lights downstairs": they switched one room instead of the floor. The prompt of Home Assistant, with floors and areas, helps there.
 
 The token speed was not the problem: LFM3 generated 42 tokens per second, MiniCPM5 25 and Ling 35 on this CPU. The time went into thinking. Other settings did not help:
 

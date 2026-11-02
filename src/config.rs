@@ -173,6 +173,9 @@ pub struct LlmConfig {
     pub ctx: Ctx,
     pub reasoning: bool,
     pub reasoning_budget: String,
+    /// Upper bound for the tokens of one reply (`--n-predict`). 0 means no
+    /// bound, which lets a degenerate generation fill the whole context.
+    pub max_tokens: u32,
     pub api_key: Option<String>,
     pub extra_args: Vec<String>,
     pub slot_cache: bool,
@@ -366,6 +369,7 @@ impl Config {
             reasoning,
             reasoning_budget: var("LLM_REASONING_BUDGET")
                 .unwrap_or_else(|| family.default_reasoning_budget().to_owned()),
+            max_tokens: parse_num("LLM_MAX_TOKENS", 1024u32)?,
             api_key: var("LLM_API_KEY"),
             extra_args: var("LLM_EXTRA_ARGS")
                 .map(|a| a.split_whitespace().map(str::to_owned).collect())
@@ -490,6 +494,7 @@ mod tests {
             ctx: Ctx::K64,
             reasoning: true,
             reasoning_budget: "512".into(),
+            max_tokens: 1024,
             api_key: None,
             extra_args: vec![],
             slot_cache: true,

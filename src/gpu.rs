@@ -12,9 +12,18 @@ use std::time::Duration;
 use tokio::sync::{Mutex, OwnedMutexGuard};
 use tokio_util::sync::CancellationToken;
 
-/// Signatures of a dead GPU (amdgpu reset, VK_ERROR_DEVICE_LOST). When they
-/// pile up, neither engine recovers on its own.
-const FAULT_SIGNS: &[&str] = &["device lost", "devicelost", "context is lost", "http error 500"];
+/// Signatures of a dead GPU (amdgpu reset, VK_ERROR_DEVICE_LOST). A timeout of
+/// the TTS engine belongs here too: a GPU that no longer runs kernels leaves
+/// audiocpp_server waiting forever. When they pile up, neither engine recovers
+/// on its own.
+const FAULT_SIGNS: &[&str] = &[
+    "device lost",
+    "devicelost",
+    "context is lost",
+    "http error 500",
+    "timed out",
+    "timeout",
+];
 const FAULT_THRESHOLD: u32 = 3;
 const LOCK_TIMEOUT: Duration = Duration::from_secs(20);
 
@@ -111,14 +120,34 @@ mod tests {
     fn three_gpu_faults_trigger_a_restart() {
         let lost = CancellationToken::new();
         let gpu = Gpu::new(lost.clone());
-        gpu.failure(&anyhow::anyhow!("timeout"));
+        gpu.failure(&anyhow::anyhow!(
+            "error sending request for url (http://127.0.0.1:8100/v1/audio/speech): operation timed out"
+        ));
         gpu.failure(&anyhow::anyhow!("vk: Device Lost"));
-        gpu.failure(&anyhow::anyhow!("HTTP error 500: boom"));
         assert!(!lost.is_cancelled());
-        gpu.success();
-        for _ in 0..3 {
-            gpu.failure(&anyhow::anyhow!("ErrorDeviceLost"));
-        }
+        gpu.failure(&anyhow::anyhow!("HTTP error 500: boom"));
         assert!(lost.is_cancelled());
+    }
+
+    #[test]
+    fn success_clears_the_fault_count() {
+        let lost = CancellationToken::new();
+        let gpu = Gpu::new(lost.clone());
+        gpu.failure(&anyhow::anyhow!("vk: Device Lost"));
+        gpu.failure(&anyhow::anyhow!("vk: Device Lost"));
+        gpu.success();
+        gpu.failure(&anyhow::anyhow!("vk: Device Lost"));
+        gpu.failure(&anyhow::anyhow!("vk: Device Lost"));
+        assert!(!lost.is_cancelled());
+    }
+
+    #[test]
+    fn other_errors_do_not_count() {
+        let lost = CancellationToken::new();
+        let gpu = Gpu::new(lost.clone());
+        for _ in 0..10 {
+            gpu.failure(&anyhow::anyhow!("no such file or directory"));
+        }
+        assert!(!lost.is_cancelled());
     }
 }

@@ -188,7 +188,8 @@ pub async fn llm(addr: &str, prompt: &str, devices: usize, key: Option<&str>) ->
     Ok(())
 }
 
-/// GET /health over plain TCP. Exit code 0 when the server answers 200.
+/// GET /health over plain TCP. Exit code 0 only when the server answers 200
+/// *and* reports `"status": "ok"`.
 pub async fn healthcheck(addr: &str) -> Result<()> {
     let mut stream = tokio::time::timeout(Duration::from_secs(5), TcpStream::connect(addr)).await??;
     stream
@@ -202,12 +203,48 @@ pub async fn healthcheck(addr: &str) -> Result<()> {
             String::from_utf8_lossy(&buf).lines().next().unwrap_or("")
         );
     }
+    let text = String::from_utf8_lossy(&buf);
+    let body = text.split_once("\r\n\r\n").map_or("", |(_, body)| body);
+    let status = serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|v| v["status"].as_str().map(str::to_owned))
+        .unwrap_or_default();
+    if status != "ok" {
+        bail!("unhealthy: {body}");
+    }
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::AsyncWriteExt;
+    use tokio::net::TcpListener;
+
+    /// Answers one request with `response`, then closes the connection.
+    async fn fake_health(response: &'static [u8]) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 1024];
+            let _ = tokio::io::AsyncReadExt::read(&mut stream, &mut buf).await;
+            stream.write_all(response).await.unwrap();
+        });
+        addr.to_string()
+    }
+
+    #[tokio::test]
+    async fn healthcheck_accepts_only_ok() {
+        let ok = fake_health(b"HTTP/1.1 200 OK\r\nconnection: close\r\n\r\n{\"status\":\"ok\"}").await;
+        assert!(healthcheck(&ok).await.is_ok());
+
+        let degraded = fake_health(b"HTTP/1.1 200 OK\r\nconnection: close\r\n\r\n{\"status\":\"degraded\"}").await;
+        assert!(healthcheck(&degraded).await.is_err());
+
+        let error = fake_health(b"HTTP/1.1 503 Service Unavailable\r\nconnection: close\r\n\r\n{}").await;
+        assert!(healthcheck(&error).await.is_err());
+    }
 
     #[test]
     fn filler_devices_grow_the_prompt() {

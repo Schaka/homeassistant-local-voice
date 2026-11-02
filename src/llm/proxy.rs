@@ -61,6 +61,17 @@ impl LlmProxy {
         })
     }
 
+    /// Probes llama-server's own `/health`. A 2xx answer means the model is
+    /// loaded; 503 means it is still loading.
+    pub async fn healthy(&self) -> bool {
+        self.client
+            .get(format!("{}/health", self.backend))
+            .timeout(Duration::from_secs(3))
+            .send()
+            .await
+            .is_ok_and(|resp| resp.status().is_success())
+    }
+
     fn authorized(&self, headers: &HeaderMap) -> bool {
         let Some(key) = &self.api_key else {
             return true;

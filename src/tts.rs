@@ -11,7 +11,7 @@ use regex::Regex;
 use serde_json::json;
 
 use crate::config::TtsConfig;
-use crate::supervisor::ChildSpec;
+use crate::supervisor::{ChildSpec, Health};
 
 pub trait TextToSpeech: Send + Sync {
     /// Returns a WAV file.
@@ -106,6 +106,14 @@ pub fn child_spec(cfg: &TtsConfig) -> Result<ChildSpec> {
         env: vec![],
         env_remove: vec![],
         starts: Default::default(),
+        health: Some(Health {
+            url: format!("http://127.0.0.1:{}/health", cfg.internal_port),
+            // The model loads lazily, the server itself answers early.
+            start_grace: Duration::from_secs(120),
+            interval: Duration::from_secs(30),
+            timeout: Duration::from_secs(10),
+            failures: 4,
+        }),
     })
 }
 
