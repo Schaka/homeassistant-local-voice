@@ -58,7 +58,9 @@ unsafe impl Send for Model {}
 // SAFETY: see above.
 unsafe impl Sync for Model {}
 
-/// llama.cpp log lines go to the debug log, errors to warnings.
+/// llama.cpp log lines go to the debug log, errors to warnings. Its warnings
+/// at load time are about the model file ("control-looking token ... was not
+/// control-type") and appear at every start, so they are debug output too.
 unsafe extern "C" fn log_callback(level: sys::ggml_log_level, text: *const c_char, _: *mut c_void) {
     if text.is_null() {
         return;
@@ -71,10 +73,10 @@ unsafe extern "C" fn log_callback(level: sys::ggml_log_level, text: *const c_cha
     }
     // ggml levels: 1 debug, 2 info, 3 warn, 4 error, 5 continuation of the
     // previous line (for example the progress dots of a model load).
-    match level {
-        4 => tracing::warn!("[embed] {line}"),
-        3 => tracing::info!("[embed] {line}"),
-        _ => tracing::debug!("[embed] {line}"),
+    if level == 4 {
+        tracing::warn!("[embed] {line}");
+    } else {
+        tracing::debug!("[embed] {line}");
     }
 }
 
@@ -128,13 +130,14 @@ impl Model {
             .with_context(|| format!("cannot load {}", dir.join("libggml.so").display()))?;
         // SAFETY: see above.
         let llama = unsafe { Llama::new(lib_llama) }.with_context(|| format!("cannot load {}", lib_llama.display()))?;
+        // Before the backend loads: llama_log_set also sets the ggml logger,
+        // and ggml logs the load of the CPU backend.
+        // SAFETY: plain C call. The callback is a static function.
+        unsafe { llama.llama_log_set(Some(log_callback), std::ptr::null_mut()) };
         load_cpu_backend(&ggml, dir)?;
 
-        // SAFETY: plain C calls. The callback is a static function.
-        unsafe {
-            llama.llama_log_set(Some(log_callback), std::ptr::null_mut());
-            llama.llama_backend_init();
-        }
+        // SAFETY: plain C call without arguments.
+        unsafe { llama.llama_backend_init() };
 
         // The CPU device only, as a NULL-terminated list.
         let mut cpu: Option<ggml_sys::ggml_backend_dev_t> = None;

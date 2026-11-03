@@ -10,11 +10,13 @@ The server has one port for everything. [architecture.md](architecture.md) lists
 |---|---|---|
 | `PORT` | `10300` | The only port: Wyoming (STT, TTS) and HTTP (`/llm/v1`, `/mcp`, `/web/search`, `/youtube/search`, `/health`) |
 | `BIND_ADDRESS` | `0.0.0.0` | Address to listen on |
-| `RUST_LOG` | `info` | Log level, for example `debug` or `info,assistant_hub=debug` |
+| `RUST_LOG` | `info` | Log level, for example `debug` or `info,assistant_hub=debug`. `info,engine=debug` shows the full output of llama-server and audiocpp_server. |
 
 Home Assistant connects to `http://<host>:10300/llm/v1` and `http://<host>:10300/mcp`.
 
-Log lines of `assistant-hub` carry the local time with its UTC offset. The time zone comes from the variable `TZ` (for example `Europe/Berlin`). Unraid sets `TZ` for every container. The lines of llama-server show the time since its start, because llama-server has no wall-clock option.
+Log lines of `assistant-hub` carry the local time with its UTC offset. The time zone comes from the variable `TZ` (for example `Europe/Berlin`). Unraid sets `TZ` for every container.
+
+The hub reads the output of llama-server and audiocpp_server and logs each line with its own time and a level. A line that names a problem (an error, a failure, an abort or a warning) is a warning. The timings of an LLM request are info. All other lines are debug: the model data at each start, the lines of each request and the health probes. When an engine exits by itself or stops answering, the hub logs its last 30 debug lines as warnings.
 
 ## Volumes
 

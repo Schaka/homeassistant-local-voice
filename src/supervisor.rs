@@ -1,6 +1,6 @@
 //! Runs the native engines (audiocpp_server, llama-server) as child processes
 //! and restarts them when they exit. They listen on 127.0.0.1 only. Their
-//! output goes to the container log as it is.
+//! output goes to the log of the hub with a level for each line ([`output`]).
 //!
 //! A [`SpecSource`] makes the spec for each start. The LLM uses this to choose
 //! its engine anew at every start, with the outcome of the last run in hand.
@@ -18,6 +18,8 @@ use tokio::process::{Child, Command};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
+mod output;
+
 /// A health probe that runs at a fixed interval.
 ///
 /// A child that exits is restarted at once. A child that hangs keeps its port
@@ -30,6 +32,8 @@ pub struct Health {
     /// A start that has not answered yet is loading its model. Failed
     /// probes only count after this, so a first model download is not a hang.
     pub start_grace: Duration,
+    /// The time between two probes once the child answered. Until then, the
+    /// probe runs every [`STARTUP_POLL`], so the log shows the real start time.
     pub interval: Duration,
     pub timeout: Duration,
     /// Consecutive failed probes before the child is restarted.
@@ -96,6 +100,11 @@ struct RunState {
 
 const RESTART_DELAY: Duration = Duration::from_secs(2);
 const STOP_GRACE: Duration = Duration::from_secs(5);
+/// The probe interval while a child loads its model.
+const STARTUP_POLL: Duration = Duration::from_secs(1);
+/// The time that the output readers get after the end of a child, so that
+/// its last lines reach the tail.
+const OUTPUT_DRAIN: Duration = Duration::from_secs(1);
 
 async fn terminate(name: &str, child: &mut Child) {
     if let Some(id) = child.id() {
@@ -130,9 +139,14 @@ async fn watch(
     let mut seen_healthy = false;
     let mut failed = 0u32;
     loop {
+        let pause = if seen_healthy || started.elapsed() >= health.start_grace {
+            health.interval
+        } else {
+            health.interval.min(STARTUP_POLL)
+        };
         tokio::select! {
             () = cancel.cancelled() => return,
-            () = tokio::time::sleep(health.interval) => {}
+            () = tokio::time::sleep(pause) => {}
         }
         if fatal.is_cancelled() {
             return;
@@ -144,7 +158,7 @@ async fn watch(
             .is_ok_and(|resp| resp.status().is_success());
         if ok {
             if !seen_healthy {
-                tracing::info!("[{name}] answers on {} after {:?}", health.url, started.elapsed());
+                tracing::info!("[{name}] ready after {:.1} s", started.elapsed().as_secs_f64());
                 seen_healthy = true;
                 state.healthy.store(true, Ordering::SeqCst);
                 if restart_when_healthy {
@@ -192,6 +206,8 @@ pub fn spawn_source(mut source: impl SpecSource, cancel: CancellationToken) -> J
             cmd.args(&spec.args)
                 .envs(spec.env.iter().map(|(k, v)| (k, v)))
                 .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
                 .kill_on_drop(true);
             for key in &spec.env_remove {
                 cmd.env_remove(key);
@@ -202,6 +218,20 @@ pub fn spawn_source(mut source: impl SpecSource, cancel: CancellationToken) -> J
             match cmd.spawn() {
                 Ok(mut child) => {
                     spec.starts.fetch_add(1, Ordering::SeqCst);
+                    let tail = output::Tail::default();
+                    let readers: Vec<JoinHandle<()>> = [
+                        child
+                            .stdout
+                            .take()
+                            .map(|out| output::forward(name.clone(), out, tail.clone())),
+                        child
+                            .stderr
+                            .take()
+                            .map(|err| output::forward(name.clone(), err, tail.clone())),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .collect();
                     let fatal = CancellationToken::new();
                     let watcher = spec.health.clone().map(|health| {
                         tokio::spawn(watch(
@@ -235,6 +265,16 @@ pub fn spawn_source(mut source: impl SpecSource, cancel: CancellationToken) -> J
                     }
                     if let Some(w) = watcher {
                         w.abort();
+                    }
+                    // A grandchild that keeps a pipe open must not stop the restart.
+                    for reader in readers {
+                        let abort = reader.abort_handle();
+                        if tokio::time::timeout(OUTPUT_DRAIN, reader).await.is_err() {
+                            abort.abort();
+                        }
+                    }
+                    if ended != Ended::Replaced {
+                        tail.report(&name);
                     }
                 }
                 Err(err) => tracing::error!("[{name}] cannot start: {err}"),
@@ -409,6 +449,21 @@ mod tests {
             kill(Pid::from_raw(pid), None).is_err()
         });
         assert!(gone, "the child process is still alive");
+    }
+
+    #[tokio::test]
+    async fn a_child_with_much_output_does_not_block_on_the_pipe() {
+        let dir = tempfile::tempdir().unwrap();
+        let done = dir.path().join("done");
+        // 2 MB on each pipe, far more than a pipe buffer holds.
+        let script = format!(
+            "head -c 2000000 /dev/zero | tr '\\0' 'x'; head -c 2000000 /dev/zero | tr '\\0' 'y' >&2; echo ok > {}; sleep 100",
+            done.display()
+        );
+        let cancel = CancellationToken::new();
+        let task = spawn(sh(&script), cancel.clone());
+        wait_for("the child writes all its output", 10, || done.exists()).await;
+        stop(task, &cancel).await;
     }
 
     #[tokio::test]
