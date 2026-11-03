@@ -247,7 +247,15 @@ fn template_for(cfg: &LlmConfig, model_file: Option<&Path>) -> Option<PathBuf> {
     }
 }
 
-fn health(cfg: &LlmConfig) -> Health {
+/// llama.cpp answers `/health` on its HTTP threads at once.
+const LLAMACPP_HEALTH_TIMEOUT: Duration = Duration::from_secs(10);
+/// ik_llama.cpp answers `/health` from the loop that also runs the model.
+/// During a long prompt, the answer waits for the end of the current batch
+/// of up to 2048 tokens. On an old CPU, that takes up to a minute. A shorter
+/// timeout lets the watchdog restart a busy engine in the middle of a request.
+const IK_HEALTH_TIMEOUT: Duration = Duration::from_secs(120);
+
+fn health(cfg: &LlmConfig, timeout: Duration) -> Health {
     Health {
         url: format!("http://127.0.0.1:{}/health", cfg.internal_port),
         // The first start downloads the model. llama-server answers 503 while
@@ -255,7 +263,7 @@ fn health(cfg: &LlmConfig) -> Health {
         // loaded. So a missing answer only counts after this.
         start_grace: Duration::from_secs(900),
         interval: Duration::from_secs(30),
-        timeout: Duration::from_secs(10),
+        timeout,
         failures: 4,
     }
 }
@@ -287,7 +295,7 @@ pub async fn llamacpp_spec(
         // The hub checks the API key itself. llama-server listens on 127.0.0.1 only.
         env_remove: vec![s("LLAMA_API_KEY")],
         starts,
-        health: Some(health(cfg)),
+        health: Some(health(cfg, LLAMACPP_HEALTH_TIMEOUT)),
         restart_when_healthy,
     }
 }
@@ -302,7 +310,7 @@ pub fn ik_spec(cfg: &LlmConfig, model: &Path, slot_cache: bool, threads: usize, 
         env: Vec::new(),
         env_remove: vec![s("LLAMA_API_KEY")],
         starts,
-        health: Some(health(cfg)),
+        health: Some(health(cfg, IK_HEALTH_TIMEOUT)),
         restart_when_healthy: false,
     }
 }

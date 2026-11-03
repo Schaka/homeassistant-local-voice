@@ -15,7 +15,7 @@ The container runs one Rust server, `assistant-hub`, on one port (10300). It is 
 
 At start, `assistant-hub` asks `llama-server --list-devices` for the Vulkan GPUs. Without one, STT and TTS run on the CPU. Then it starts the child processes and restarts them 2 s after they exit. On SIGTERM it saves the prompt cache of the LLM engine, stops the children and exits. A stop takes less than a second.
 
-The hub also probes `/health` of both children every 30 s. A child that exits is restarted at once. A child that hangs keeps its port open and never exits, so only a probe can find it. After four failed probes in a row, the hub stops the child and the normal restart starts a fresh engine. A start that has not answered yet is loading its model. As a result, failed probes only count after a grace period. Until the first answer, the probe runs every second, and the log shows the start time (`[llama-server] ready after 7.4 s`).
+The hub also probes `/health` of both children every 30 s. A child that exits is restarted at once. A child that hangs keeps its port open and never exits, so only a probe can find it. After four failed probes in a row, the hub stops the child and the normal restart starts a fresh engine. A probe waits 10 s for an answer. For ik_llama.cpp it waits 120 s, because ik_llama.cpp answers `/health` only between two batches of a long prompt. A start that has not answered yet is loading its model. As a result, failed probes only count after a grace period. Until the first answer, the probe runs every second, and the log shows the start time (`[llama-server] ready after 7.4 s`).
 
 The hub reads the output of the children and logs each line with a level. Problems are warnings, the timings of an LLM request are info, and the rest is debug. [configuration.md](configuration.md#ports) has the details.
 
@@ -32,7 +32,7 @@ A client that sends nothing for 30 s is dropped.
 
 | Route | Purpose |
 |---|---|
-| `GET /health` | Status of STT, TTS, LLM, web search and YouTube search. The hub probes STT and TTS directly and the LLM through `/health` of llama-server. The answer is 503 unless `status` is `ok`. The Docker health check uses it (`assistant-hub healthcheck`). |
+| `GET /health` | Status of STT, TTS, LLM, web search and YouTube search. The hub probes STT and TTS directly and the LLM through `/health` of llama-server. If llama-server does not answer in 3 s while a request runs, the LLM is `busy`, which is no fault. The answer is 503 unless `status` is `ok`. The Docker health check uses it (`assistant-hub healthcheck`). |
 | `/llm/...` | Forwarded to llama-server without the `/llm` prefix. `/llm/v1/chat/completions` becomes `/v1/chat/completions`. Bodies stream in both directions, so server-sent events arrive token by token. With `LLM_API_KEY`, the server checks the key itself. |
 | `POST /mcp` | MCP server (Streamable HTTP, JSON responses) with all tools. A new tool is one more entry in `src/mcp.rs`, not a new endpoint. |
 | `GET /web/search?q=...&max_results=3` | Web search as JSON: the query as sent, the text that the MCP tool returns, and the results. |

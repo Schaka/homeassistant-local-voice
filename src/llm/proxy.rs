@@ -3,11 +3,14 @@
 //! Request and response bodies stream through, so server-sent events from
 //! `/llm/v1/chat/completions` reach the client token by token.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use axum::body::Body;
 use axum::http::{HeaderMap, HeaderName, Method, Request, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
+use futures_util::StreamExt;
 use serde_json::json;
 
 const HOP_HEADERS: &[&str] = &[
@@ -27,6 +30,45 @@ pub struct LlmProxy {
     client: reqwest::Client,
     backend: String,
     api_key: Option<String>,
+    /// Requests that are forwarded and not yet answered to the end.
+    in_flight: Arc<AtomicUsize>,
+}
+
+/// The state of llama-server, from its own `/health`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LlmHealth {
+    Ok,
+    /// No answer in time while a request runs. ik_llama.cpp answers `/health`
+    /// only between two batches of a long prompt.
+    Busy,
+    /// Loading, not running, or no answer without a request.
+    Unavailable,
+}
+
+impl LlmHealth {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Ok => "ok",
+            Self::Busy => "busy",
+            Self::Unavailable => "unavailable",
+        }
+    }
+}
+
+/// Counts one forwarded request until it is dropped.
+struct InFlight(Arc<AtomicUsize>);
+
+impl InFlight {
+    fn new(count: &Arc<AtomicUsize>) -> Self {
+        count.fetch_add(1, Ordering::SeqCst);
+        Self(count.clone())
+    }
+}
+
+impl Drop for InFlight {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 fn error(status: StatusCode, message: &str, kind: &str) -> Response {
@@ -58,18 +100,24 @@ impl LlmProxy {
             client,
             backend: format!("http://127.0.0.1:{port}"),
             api_key,
+            in_flight: Arc::default(),
         })
     }
 
     /// Probes llama-server's own `/health`. A 2xx answer means the model is
-    /// loaded; 503 means it is still loading.
-    pub async fn healthy(&self) -> bool {
-        self.client
+    /// loaded. 503 means that it loads the model.
+    pub async fn health(&self) -> LlmHealth {
+        let probe = self
+            .client
             .get(format!("{}/health", self.backend))
             .timeout(Duration::from_secs(3))
             .send()
-            .await
-            .is_ok_and(|resp| resp.status().is_success())
+            .await;
+        match probe {
+            Ok(resp) if resp.status().is_success() => LlmHealth::Ok,
+            Err(err) if err.is_timeout() && self.in_flight.load(Ordering::SeqCst) > 0 => LlmHealth::Busy,
+            _ => LlmHealth::Unavailable,
+        }
     }
 
     fn authorized(&self, headers: &HeaderMap) -> bool {
@@ -88,6 +136,7 @@ impl LlmProxy {
         if !self.authorized(&parts.headers) {
             return error(StatusCode::UNAUTHORIZED, "Invalid API Key", "authentication_error");
         }
+        let in_flight = InFlight::new(&self.in_flight);
         let url = format!("{}{}", self.backend, backend_path(&parts.uri));
         let method = reqwest::Method::from_bytes(parts.method.as_str().as_bytes()).unwrap_or(reqwest::Method::GET);
         let mut out = self.client.request(method, &url);
@@ -119,8 +168,13 @@ impl LlmProxy {
                 builder = builder.header(name.as_str(), value.as_bytes());
             }
         }
+        // The count ends with the body stream, after the last token.
+        let body = resp.bytes_stream().map(move |chunk| {
+            let _counted = &in_flight;
+            chunk
+        });
         builder
-            .body(Body::from_stream(resp.bytes_stream()))
+            .body(Body::from_stream(body))
             .unwrap_or_else(|err| error(StatusCode::BAD_GATEWAY, &err.to_string(), "upstream_error"))
     }
 }
@@ -129,7 +183,6 @@ impl LlmProxy {
 mod tests {
     use super::*;
     use crate::llm::fake::{Fake, HealthMode, closed_port};
-    use futures_util::StreamExt;
     use std::time::Instant;
 
     #[test]
@@ -318,18 +371,22 @@ mod tests {
         assert_eq!(resp.status(), 503);
         let v: serde_json::Value = serde_json::from_str(&body_text(resp).await).unwrap();
         assert_eq!(v["error"]["type"], "unavailable");
-        assert!(!proxy.healthy().await);
+        assert_eq!(proxy.health().await, LlmHealth::Unavailable);
     }
 
     #[tokio::test]
     async fn health_follows_the_backend() {
         let fake = Fake::default();
         let proxy = proxy_to_fake(&fake, None).await;
-        assert!(proxy.healthy().await);
+        assert_eq!(proxy.health().await, LlmHealth::Ok);
         fake.set_health(HealthMode::Loading);
-        assert!(!proxy.healthy().await, "503 while the model loads");
+        assert_eq!(
+            proxy.health().await,
+            LlmHealth::Unavailable,
+            "503 while the model loads"
+        );
         fake.set_health(HealthMode::Ok);
-        assert!(proxy.healthy().await);
+        assert_eq!(proxy.health().await, LlmHealth::Ok);
     }
 
     #[tokio::test]
@@ -338,11 +395,24 @@ mod tests {
         fake.set_health(HealthMode::Hang);
         let proxy = proxy_to_fake(&fake, None).await;
         let start = Instant::now();
-        assert!(!proxy.healthy().await);
+        assert_eq!(proxy.health().await, LlmHealth::Unavailable);
         let took = start.elapsed();
         assert!(
             took >= Duration::from_secs(3) && took < Duration::from_secs(8),
             "the probe gave up after {took:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn a_late_health_answer_during_a_request_is_busy_and_the_count_ends_with_the_body() {
+        let fake = Fake::default();
+        let proxy = proxy_to_fake(&fake, None).await;
+        let resp = proxy.forward(chat(true)).await;
+        assert_eq!(resp.status(), 200);
+        fake.set_health(HealthMode::Hang);
+        assert_eq!(proxy.health().await, LlmHealth::Busy, "a request still streams");
+        let _ = body_text(resp).await;
+        assert_eq!(proxy.in_flight.load(Ordering::SeqCst), 0);
+        assert_eq!(proxy.health().await, LlmHealth::Unavailable);
     }
 }

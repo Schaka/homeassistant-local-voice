@@ -75,12 +75,12 @@ async fn health(State(app): State<Shared>) -> Response {
     let tts = app.voice.tts.healthy().await;
     let llm = match &app.llm {
         None => "off",
-        Some(proxy) if proxy.healthy().await => "ok",
-        Some(_) => "unavailable",
+        Some(proxy) => proxy.health().await.name(),
     };
     let stt = app.voice.stt.is_some();
     // 503 when a configured part does not answer. The supervisor restarts a
-    // hung engine, but the container must say so until that happens.
+    // hung engine, but the container must say so until that happens. A busy
+    // LLM works on a request and is no fault.
     let ok = stt && tts && llm != "unavailable";
     let code = if ok {
         StatusCode::OK
