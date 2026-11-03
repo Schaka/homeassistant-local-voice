@@ -145,7 +145,7 @@ ik_llama.cpp is a fork of llama.cpp with faster CPU code. It runs on the CPU onl
 
 In every other case, llama.cpp runs the model. The log names the engine and the reason at each start (`LLM engine: ...`). `LLM_ENGINE=llamacpp` always uses llama.cpp. `LLM_ENGINE=ik` uses ik_llama.cpp for any model on the CPU, also one that is not in the table. The server does not test such a model.
 
-If ik_llama.cpp fails to start twice in a row, or stops within two minutes of a start twice in a row, llama.cpp runs the model until the next start of the container. A model from `LLM_HF_REPO` that is not downloaded yet starts on llama.cpp, because ik_llama.cpp cannot download by repository name. When the model answers, the server restarts on ik_llama.cpp. During this one restart, requests get a 503.
+If ik_llama.cpp fails to start twice in a row, or stops within two minutes of a start twice in a row, llama.cpp runs the model until the next start of the container. A model from `LLM_HF_REPO` that is not downloaded yet starts on llama.cpp, because ik_llama.cpp cannot download by repository name. When the model answers, the server restarts on ik_llama.cpp. During this one restart, requests get a 503. The server finds the downloaded file by the tag of `LLM_HF_REPO` (`q4_k_m` without a tag). If no file name in the cache contains the tag, the model stays on llama.cpp, and the log names the cause.
 
 The server hides these differences, so the same settings work with both programs:
 

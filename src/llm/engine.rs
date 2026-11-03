@@ -78,6 +78,9 @@ pub struct Facts<'a> {
     /// file yet.
     pub architecture: Option<&'a str>,
     pub model_on_disk: bool,
+    /// A download-first run of llama.cpp ended at its first good answer, and
+    /// the hub still finds no model file in the download cache.
+    pub download_done: bool,
     pub cpu_avx2_fma: bool,
     pub ik_binary: bool,
     /// Two starts of ik_llama.cpp in a row failed.
@@ -133,6 +136,14 @@ pub fn decide(f: &Facts) -> Decision {
         return llamacpp("ik_llama.cpp is not verified for this model family");
     }
     if !f.model_on_disk {
+        if f.download_done {
+            // Another download-first start would end at the first good answer
+            // again, and the engine would restart forever.
+            return llamacpp(
+                "the hub does not find the downloaded model file in the cache, give the quantization in \
+                 LLM_HF_REPO (repo:tag) or a file in LLM_MODEL_FILENAME",
+            );
+        }
         // ik_llama.cpp cannot download a model by repository name. llama.cpp
         // downloads it, then the server restarts on ik_llama.cpp.
         return Decision {
@@ -246,6 +257,7 @@ mod tests {
             family: Family::Ling3,
             architecture: Some("bailingmoe3"),
             model_on_disk: true,
+            download_done: false,
             cpu_avx2_fma: true,
             ik_binary: true,
             ik_banned: false,
@@ -400,6 +412,18 @@ mod tests {
             ..facts()
         });
         assert!(d.download_first && d.kind == EngineKind::LlamaCpp);
+    }
+
+    #[test]
+    fn a_download_that_the_hub_does_not_find_is_not_repeated() {
+        let d = decide(&Facts {
+            model_on_disk: false,
+            download_done: true,
+            architecture: None,
+            ..facts()
+        });
+        assert_eq!(d.kind, EngineKind::LlamaCpp);
+        assert!(!d.download_first);
     }
 
     fn outcome(ended: Ended, healthy: bool, secs: u64) -> Option<RunOutcome> {

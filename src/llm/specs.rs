@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
 use crate::config::LlmConfig;
-use crate::supervisor::{ChildSpec, RunOutcome, SpecSource};
+use crate::supervisor::{ChildSpec, Ended, RunOutcome, SpecSource};
 
 use super::engine::{self, ActiveEngine, Chooser, Decision, EngineKind, Facts};
 use super::{ik_spec, llamacpp_spec, model_file, slots_usable};
@@ -59,6 +59,8 @@ pub struct LlmSpecs {
     slots: bool,
     starts: Arc<AtomicU64>,
     last: Option<EngineKind>,
+    /// A download-first run ended at its first good answer.
+    download_done: bool,
 }
 
 /// What `main` needs besides the spec source.
@@ -89,6 +91,7 @@ pub fn setup_on(cfg: &LlmConfig, host: Host) -> Setup {
             slots,
             starts: starts.clone(),
             last: None,
+            download_done: false,
         },
         slots_usable: slots,
         active,
@@ -103,6 +106,9 @@ impl LlmSpecs {
         if let Some(kind) = self.last {
             self.chooser.note(kind, last);
         }
+        if last.is_some_and(|o| o.ended == Ended::Replaced) {
+            self.download_done = true;
+        }
         let model = model_file(&self.cfg);
         let architecture = model
             .as_deref()
@@ -113,6 +119,7 @@ impl LlmSpecs {
             family: self.cfg.family,
             architecture: architecture.as_deref(),
             model_on_disk: model.is_some(),
+            download_done: self.download_done,
             cpu_avx2_fma: engine::has_avx2_fma(&self.host.cpuinfo),
             ik_binary: self.cfg.ik_bin.is_file(),
             ik_banned: self.chooser.banned(),
@@ -144,7 +151,6 @@ impl SpecSource for LlmSpecs {
 mod tests {
     use super::*;
     use crate::config::{EngineChoice, Family, LlmSource};
-    use crate::supervisor::Ended;
     use std::path::Path;
     use std::time::Duration;
 
@@ -289,6 +295,25 @@ mod tests {
         assert_eq!(d.kind, EngineKind::Ik);
         assert!(spec.args.iter().any(|a| a.contains("Ling-3.0-tiny-Q4_K_M.gguf")));
         assert!(!spec.args.contains(&"-hf".to_owned()));
+    }
+
+    #[tokio::test]
+    async fn a_download_that_the_hub_does_not_find_runs_on_llamacpp_without_more_restarts() {
+        let mut r = rig("bailingmoe3");
+        r.cfg.source = LlmSource::HfRepo("inclusionAI/Ling-3.0-tiny-GGUF".into());
+        let mut s = setup_on(&r.cfg, host());
+        assert!(s.specs.plan(None).await.0.download_first);
+        // llama.cpp chose another quantization than the q4_k_m that the hub
+        // looks for, so the cache has no matching file.
+        let replaced = Some(RunOutcome {
+            ended: Ended::Replaced,
+            healthy: true,
+            ran: Duration::from_secs(60),
+        });
+        let (d, spec) = s.specs.plan(replaced).await;
+        assert_eq!(d.kind, EngineKind::LlamaCpp);
+        assert!(!d.download_first);
+        assert!(!spec.restart_when_healthy);
     }
 
     #[tokio::test]
