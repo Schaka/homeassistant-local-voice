@@ -3,8 +3,9 @@
 //! It takes the same values as llama.cpp, with these differences. It has no
 //! `--device`, no `-ngl`, no `--offline` and no download by repository name,
 //! so it gets a model file. The web interface is `--webui none`. The reply
-//! limit is `-n`. It writes no trace file (`--log-disable`). Its own default
-//! of 8 threads does not fit every CPU.
+//! limit is `-n`. A larger `max_tokens` of a client is cut to it, with a
+//! warning in the log. It writes no trace file (`--log-disable`). Its own
+//! default of 8 threads does not fit every CPU.
 
 use std::path::Path;
 
