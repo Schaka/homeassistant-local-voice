@@ -53,6 +53,11 @@ pub trait SearchBackend: Send + Sync {
 /// The Python side: initializes SearXNG once and runs one search per call.
 /// SearXNG's search code needs a Flask request context, but no running web
 /// server, so a test request context of an empty Flask app is enough.
+///
+/// The engines of the category "onions" (ahmia, torch) need a Tor proxy.
+/// Without one, SearXNG refuses to load each of them and logs an error line
+/// at every start. The hub never configures Tor and searches the category
+/// "general" only, so the bootstrap marks them inactive before the load.
 const BOOTSTRAP: &str = r#"
 import json
 import flask
@@ -60,6 +65,17 @@ import searx
 import searx.engines
 import searx.search
 from searx.search.models import EngineRef, SearchQuery
+
+
+def _categories(engine):
+    value = engine.get("categories", [])
+    return [c.strip() for c in value.split(",")] if isinstance(value, str) else value
+
+
+_tor = searx.settings["outgoing"].get("using_tor_proxy")
+for _engine in searx.settings["engines"]:
+    if "onions" in _categories(_engine) and not (_tor or _engine.get("using_tor_proxy")):
+        _engine["inactive"] = True
 
 searx.search.initialize()
 _app = flask.Flask("assistant-hub")

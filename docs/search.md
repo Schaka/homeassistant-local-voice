@@ -102,3 +102,4 @@ The apps open the item by `item_id`: Wholphin with `wholphin://play?itemId=...&p
 3. SearXNG gets a new random secret at each start, because it keeps no state.
 4. Some search engines block SearXNG now and then, for example with a CAPTCHA. SearXNG then uses the other engines.
 5. The container log shows each search as `search "<query>"` and each YouTube pick as `youtube "<query>" -> ...`.
+6. The server searches with the engines of the SearXNG category "general". The engines of the category "onions" (ahmia, torch) need a Tor proxy, and the server has none. So it turns them off before SearXNG loads its engines.
