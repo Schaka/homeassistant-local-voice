@@ -402,7 +402,7 @@ mod tests {
         let voice = Arc::new(Voice {
             stt: Some(Arc::new(FakeStt)),
             tts: Arc::new(FakeTts(tts_healthy)),
-            gpu: crate::gpu::Gpu::new(CancellationToken::new()),
+            gpu: crate::gpu::Gpu::new(CancellationToken::new(), true, true),
             info: crate::wyoming::info("stt-model", "alba", &["en".to_owned()]),
             debug_dir: None,
         });

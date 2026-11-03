@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, BufReader, BufWriter};
 
 use crate::audio::{self, Format};
-use crate::gpu::Gpu;
+use crate::gpu::{Gpu, Speech};
 use crate::stt::{self, SpeechToText};
 use crate::tts::{self, TextToSpeech};
 use protocol::{Event, read_event, write_event};
@@ -97,7 +97,7 @@ impl Voice {
         .await?;
         match result {
             Ok(text) => {
-                self.gpu.success();
+                self.gpu.success(Speech::Stt);
                 if let Some(dir) = self.debug_dir.clone() {
                     let text = text.clone();
                     tokio::task::spawn_blocking(move || stt::save_debug_recording(&dir, &pcm, &text));
@@ -105,7 +105,7 @@ impl Voice {
                 Ok(text)
             }
             Err(err) => {
-                self.gpu.failure(&err);
+                self.gpu.failure(Speech::Stt, &err);
                 Err(err)
             }
         }
@@ -115,11 +115,11 @@ impl Voice {
         let _guard = self.gpu.acquire().await?;
         match self.tts.synthesize(text, voice).await {
             Ok(wav) => {
-                self.gpu.success();
+                self.gpu.success(Speech::Tts);
                 Ok(wav)
             }
             Err(err) => {
-                self.gpu.failure(&err);
+                self.gpu.failure(Speech::Tts, &err);
                 Err(err)
             }
         }

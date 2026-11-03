@@ -15,7 +15,9 @@ use tokio_util::sync::CancellationToken;
 /// Signs of a dead GPU (amdgpu reset, VK_ERROR_DEVICE_LOST). A timeout of the
 /// TTS engine is also a sign: a GPU that stops running kernels leaves
 /// audiocpp_server waiting forever. After three of these signs, neither engine
-/// recovers on its own.
+/// recovers on its own. They count only for an engine that runs on the GPU.
+/// On the CPU, a timeout means a long text on a slow CPU, and a restart of the
+/// container does not make the CPU faster.
 const FAULT_SIGNS: &[&str] = &[
     "device lost",
     "devicelost",
@@ -27,21 +29,39 @@ const FAULT_SIGNS: &[&str] = &[
 const FAULT_THRESHOLD: u32 = 3;
 const LOCK_TIMEOUT: Duration = Duration::from_secs(20);
 
+/// The speech engine that reports a result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Speech {
+    Stt,
+    Tts,
+}
+
 #[derive(Clone)]
 pub struct Gpu {
     lock: Arc<Mutex<()>>,
     faults: Arc<AtomicU32>,
     lost: CancellationToken,
+    stt_on_gpu: bool,
+    tts_on_gpu: bool,
 }
 
 impl Gpu {
     /// `lost` fires after 3 GPU faults in a row. The server then exits with an
     /// error, and the restart policy of the container starts it fresh.
-    pub fn new(lost: CancellationToken) -> Self {
+    pub fn new(lost: CancellationToken, stt_on_gpu: bool, tts_on_gpu: bool) -> Self {
         Self {
             lock: Arc::new(Mutex::new(())),
             faults: Arc::new(AtomicU32::new(0)),
             lost,
+            stt_on_gpu,
+            tts_on_gpu,
+        }
+    }
+
+    fn on_gpu(&self, engine: Speech) -> bool {
+        match engine {
+            Speech::Stt => self.stt_on_gpu,
+            Speech::Tts => self.tts_on_gpu,
         }
     }
 
@@ -51,16 +71,19 @@ impl Gpu {
             .map_err(|_| anyhow::anyhow!("GPU busy (previous STT/TTS request still running)"))
     }
 
-    pub fn success(&self) {
+    pub fn success(&self, engine: Speech) {
+        if !self.on_gpu(engine) {
+            return;
+        }
         let old = self.faults.swap(0, Ordering::Relaxed);
         if old > 0 {
             tracing::info!("GPU recovered (cleared {old} faults)");
         }
     }
 
-    pub fn failure(&self, err: &anyhow::Error) {
+    pub fn failure(&self, engine: Speech, err: &anyhow::Error) {
         let text = format!("{err:#}").to_lowercase();
-        if !FAULT_SIGNS.iter().any(|s| text.contains(s)) {
+        if !self.on_gpu(engine) || !FAULT_SIGNS.iter().any(|s| text.contains(s)) {
             tracing::warn!("non-GPU failure (not counted): {err:#}");
             return;
         }
@@ -119,34 +142,51 @@ mod tests {
     #[test]
     fn three_gpu_faults_trigger_a_restart() {
         let lost = CancellationToken::new();
-        let gpu = Gpu::new(lost.clone());
-        gpu.failure(&anyhow::anyhow!(
-            "error sending request for url (http://127.0.0.1:8100/v1/audio/speech): operation timed out"
-        ));
-        gpu.failure(&anyhow::anyhow!("vk: Device Lost"));
+        let gpu = Gpu::new(lost.clone(), true, true);
+        gpu.failure(
+            Speech::Tts,
+            &anyhow::anyhow!(
+                "error sending request for url (http://127.0.0.1:8100/v1/audio/speech): operation timed out"
+            ),
+        );
+        gpu.failure(Speech::Tts, &anyhow::anyhow!("vk: Device Lost"));
         assert!(!lost.is_cancelled());
-        gpu.failure(&anyhow::anyhow!("HTTP error 500: boom"));
+        gpu.failure(Speech::Tts, &anyhow::anyhow!("HTTP error 500: boom"));
         assert!(lost.is_cancelled());
     }
 
     #[test]
     fn success_clears_the_fault_count() {
         let lost = CancellationToken::new();
-        let gpu = Gpu::new(lost.clone());
-        gpu.failure(&anyhow::anyhow!("vk: Device Lost"));
-        gpu.failure(&anyhow::anyhow!("vk: Device Lost"));
-        gpu.success();
-        gpu.failure(&anyhow::anyhow!("vk: Device Lost"));
-        gpu.failure(&anyhow::anyhow!("vk: Device Lost"));
+        let gpu = Gpu::new(lost.clone(), true, true);
+        gpu.failure(Speech::Tts, &anyhow::anyhow!("vk: Device Lost"));
+        gpu.failure(Speech::Tts, &anyhow::anyhow!("vk: Device Lost"));
+        gpu.success(Speech::Tts);
+        gpu.failure(Speech::Tts, &anyhow::anyhow!("vk: Device Lost"));
+        gpu.failure(Speech::Tts, &anyhow::anyhow!("vk: Device Lost"));
         assert!(!lost.is_cancelled());
+    }
+
+    #[test]
+    fn faults_of_an_engine_on_the_cpu_do_not_count() {
+        let lost = CancellationToken::new();
+        let gpu = Gpu::new(lost.clone(), true, false);
+        for _ in 0..10 {
+            gpu.failure(Speech::Tts, &anyhow::anyhow!("operation timed out"));
+        }
+        assert!(!lost.is_cancelled());
+        for _ in 0..3 {
+            gpu.failure(Speech::Stt, &anyhow::anyhow!("vk: Device Lost"));
+        }
+        assert!(lost.is_cancelled());
     }
 
     #[test]
     fn other_errors_do_not_count() {
         let lost = CancellationToken::new();
-        let gpu = Gpu::new(lost.clone());
+        let gpu = Gpu::new(lost.clone(), true, true);
         for _ in 0..10 {
-            gpu.failure(&anyhow::anyhow!("no such file or directory"));
+            gpu.failure(Speech::Tts, &anyhow::anyhow!("no such file or directory"));
         }
         assert!(!lost.is_cancelled());
     }

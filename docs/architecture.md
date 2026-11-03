@@ -44,7 +44,7 @@ A client that sends nothing for 30 s is dropped.
 
 The `info` answer lists the services `parakeet` and `audiocpp`. STT collects the audio of a request as it arrives and converts it once at `audio-stop` to 16 kHz mono. TTS answers with `audio-start`, chunks of 4096 samples and `audio-stop`.
 
-STT and TTS share one GPU lock, so they never run on the GPU at the same time. Three GPU faults in a row ("device lost", HTTP 500 from audiocpp_server, a timeout of 120 s) make the server exit with an error. The restart policy of the container then starts it with a clean GPU state.
+STT and TTS share one GPU lock, so they never run on the GPU at the same time. Three GPU faults in a row ("device lost", HTTP 500 from audiocpp_server, a timeout of 120 s) make the server exit with an error. The restart policy of the container then starts it with a clean GPU state. Only the errors of an engine on the GPU count. On the CPU, a timeout comes from a long text on a slow CPU, and a restart does not help.
 
 ## Source
 

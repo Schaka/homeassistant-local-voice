@@ -343,6 +343,13 @@ async fn run(cfg: Config) -> Result<bool> {
     let shutdown = CancellationToken::new();
     let gpu_lost = CancellationToken::new();
     let mut supervised = Vec::new();
+    // choose_speech_devices sets both before run.
+    let stt_on_gpu = cfg
+        .stt
+        .device
+        .as_deref()
+        .is_some_and(|device| !device.eq_ignore_ascii_case("cpu"));
+    let tts_on_gpu = cfg.tts.backend == config::TtsBackend::Vulkan;
 
     // TTS engine.
     supervised.push(supervisor::spawn(tts::child_spec(&cfg.tts)?, children.clone()));
@@ -425,7 +432,7 @@ async fn run(cfg: Config) -> Result<bool> {
     let voice = Arc::new(wyoming::Voice {
         stt,
         tts,
-        gpu: gpu::Gpu::new(gpu_lost.clone()),
+        gpu: gpu::Gpu::new(gpu_lost.clone(), stt_on_gpu, tts_on_gpu),
         info: wyoming::info(&cfg.stt.model_name, &cfg.tts.voice_id, &cfg.tts.languages_bcp),
         debug_dir: cfg.stt.debug_dir.clone(),
     });
