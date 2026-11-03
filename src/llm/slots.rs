@@ -236,6 +236,16 @@ impl SlotCache {
                 res["n_restored"],
                 res["timings"]["restore_ms"].as_f64().unwrap_or(0.0)
             ),
+            // The engine stopped during the restore, for example at a
+            // restart. That says nothing about the file, and the next start
+            // restores it.
+            Err(err)
+                if err
+                    .downcast_ref::<reqwest::Error>()
+                    .is_some_and(|e| !e.is_timeout() && !e.is_status()) =>
+            {
+                tracing::warn!("prompt cache: restore failed ({err}), keeping {file}");
+            }
             Err(err) => {
                 // Wrong model or context size: the file is useless, start fresh.
                 tracing::warn!("prompt cache: restore failed ({err}), removing {file}");
@@ -471,6 +481,21 @@ mod tests {
         settle().await;
         assert_eq!(r.fake.seen_with("/slots/0?action=restore").len(), 1);
         assert!(!file.exists(), "a file that cannot be restored is removed");
+        cancel.cancel();
+    }
+
+    #[tokio::test]
+    async fn an_engine_that_stops_during_the_restore_keeps_the_file() {
+        let r = rig().await;
+        let file = r.dir.path().join("m.slot");
+        std::fs::write(&file, b"x").unwrap();
+        r.fake.set_restore_status(0);
+        let cancel = CancellationToken::new();
+        tokio::spawn(r.cache.clone().run(cancel.clone()));
+        r.starts.fetch_add(1, Ordering::SeqCst);
+        settle().await;
+        assert_eq!(r.fake.seen_with("/slots/0?action=restore").len(), 1);
+        assert!(file.exists(), "the next start restores the file");
         cancel.cancel();
     }
 

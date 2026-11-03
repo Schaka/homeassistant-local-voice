@@ -133,6 +133,8 @@ impl Fake {
         *self.0.save_dir.lock().unwrap() = Some(dir);
     }
 
+    /// The status of a restore answer. 0 breaks the connection in the middle
+    /// of the answer, like an engine that stops.
     pub fn set_restore_status(&self, status: u16) {
         *self.0.restore_status.lock().unwrap() = status;
     }
@@ -291,6 +293,15 @@ impl Fake {
             let status = *self.0.restore_status.lock().unwrap();
             if status == 200 {
                 json(200, LLAMACPP_SLOT_RESTORE)
+            } else if status == 0 {
+                let broken = futures_util::stream::once(async {
+                    Err::<bytes::Bytes, _>(std::io::Error::other("engine stopped"))
+                });
+                Response::builder()
+                    .status(200)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from_stream(broken))
+                    .unwrap()
             } else {
                 json(
                     status,
