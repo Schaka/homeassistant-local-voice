@@ -428,7 +428,7 @@ impl Config {
         match var_or("STT_DENOISE", "off").as_str() {
             "off" => Ok(None),
             "hush" => {
-                let atten_lim_db: f32 = parse_num("STT_DENOISE_ATTEN_DB", 100.0)?;
+                let atten_lim_db: f32 = parse_num("STT_DENOISE_ATTEN_DB", 30.0)?;
                 if !(0.0..=100.0).contains(&atten_lim_db) {
                     bail!("STT_DENOISE_ATTEN_DB={atten_lim_db} is outside 0 to 100");
                 }
@@ -627,11 +627,11 @@ mod tests {
         let d = denoise(&[("STT_DENOISE", "hush")]).unwrap().unwrap();
         assert_eq!(d.lib, PathBuf::from("/usr/lib/libweya_nc.so"));
         assert_eq!(d.model, PathBuf::from("/opt/hush/hush-dfnet16k-onnx.tar.gz"));
-        assert_eq!(d.atten_lim_db, 100.0);
-        let d = denoise(&[("STT_DENOISE", "hush"), ("STT_DENOISE_ATTEN_DB", "30")])
+        assert_eq!(d.atten_lim_db, 30.0);
+        let d = denoise(&[("STT_DENOISE", "hush"), ("STT_DENOISE_ATTEN_DB", "100")])
             .unwrap()
             .unwrap();
-        assert_eq!(d.atten_lim_db, 30.0);
+        assert_eq!(d.atten_lim_db, 100.0);
     }
 
     #[test]

@@ -23,7 +23,7 @@ The log shows each run, for example `STT cleanup: 2.4 s of audio in <time> ms`. 
 | Variable | Default | Purpose |
 |---|---|---|
 | `STT_DENOISE` | `off` | `hush` turns the cleanup on |
-| `STT_DENOISE_ATTEN_DB` | `100` | The most that Hush may lower any part of the audio, in dB. 100 is no limit. A lower value, for example 30, leaves more background and changes the voice less. |
+| `STT_DENOISE_ATTEN_DB` | `30` | The most that Hush may lower any part of the audio, in dB. 100 is no limit. A lower value leaves more background and changes the voice less. |
 | `STT_DENOISE_MODEL` | `/opt/hush/hush-dfnet16k-onnx.tar.gz` | The model bundle |
 | `STT_DENOISE_LIB` | `/usr/lib/libweya_nc.so` | The library |
 
@@ -36,8 +36,23 @@ Hush changes what STT hears, so test it with your own satellites before you leav
 1. Set `STT_DEBUG_DIR` and `STT_DENOISE=hush`. Each request then gives three files: the raw audio (`*.wav`), the audio that STT heard (`*-clean.wav`) and the transcript.
 2. Speak the usual commands with the TV on and with the TV off.
 3. Listen to the pairs and compare the transcripts. Run a raw file through STT with `assistant-hub probe stt FILE.wav` to see the transcript without Hush.
-4. If Hush removes parts of the command, set `STT_DENOISE_ATTEN_DB=30`. If the TV still comes through, it is louder than Hush can handle at that distance. Then turn the TV down while the satellite listens, for example with an automation that mutes the receiver.
+4. If Hush removes parts of the command, set a lower `STT_DENOISE_ATTEN_DB`, for example 20. If the TV still comes through, it is louder than Hush can handle at that distance. Then turn the TV down while the satellite listens, for example with an automation that mutes the receiver.
 5. Turn `STT_DEBUG_DIR` off again. The recordings hold everything that people say after the wake word.
+
+## Measured
+
+Test set: 8 voice commands spoken by PocketTTS (lights, sensors, music, shopping list, weather, timer, TV, YouTube), each with 0.5 s of audio before and after it. The background is Japanese news speech ("Spoken Wikinews - Japanese 001", CC BY 4.0, Wikimedia Commons), a different part for each command. SIR is the level of the command above the background. STT is Parakeet TDT 1.1B Q8_0 on an Intel UHD 730, through `assistant-hub probe stt`. A command counts only if the transcript is exactly right. Measured on 2026-11-07.
+
+| Background | Raw audio | Hush, 100 dB limit | Hush, 30 dB limit |
+|---|---|---|---|
+| None | 8 of 8 | 8 of 8 | 8 of 8 |
+| SIR 12 dB | 8 of 8 | 8 of 8 | 8 of 8 |
+| SIR 6 dB | 7 of 8 | 7 of 8 | 8 of 8 |
+| SIR 0 dB (the TV as loud as the voice) | 2 of 8 | 5 of 8 | 6 of 8 |
+
+At SIR 0 dB, the raw audio gave three empty or one-word transcripts ("", "oh", "they"). With Hush at 30 dB, the two misses were "and on the hallway lights" and "play lincoln park in the kitchen". The 100 dB limit lost the first word "turn" also at SIR 6 dB.
+
+Time on an Intel Core i9-13900K: 110 ms for a request of 3.4 s, about 30 ms for each second of audio. The model bundle is 8.6 MB.
 
 ## Build
 

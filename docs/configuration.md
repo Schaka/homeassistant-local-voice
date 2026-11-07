@@ -37,7 +37,7 @@ The image contains the default STT and TTS models. Mount a folder only to use ot
 | `PARAKEET_DEVICE` | empty | Device for STT: `Vulkan0`, `Vulkan1` or `cpu`. Empty selects the first Vulkan GPU, or the CPU if there is none. |
 | `STT_DEBUG_DIR` | empty | Folder for recordings of every STT request (WAV and transcript, newest 200). Use it to compare models on real requests, then turn it off. With `STT_DENOISE`, the audio that STT heard is next to each recording as `*-clean.wav`. |
 | `STT_DENOISE` | `off` | `hush` cleans the audio of each request with Hush before STT: noise and a competing speaker, such as a TV ([denoise.md](denoise.md)). |
-| `STT_DENOISE_ATTEN_DB` | `100` | The most that Hush may lower any part of the audio, in dB, from 0 to 100. 100 is no limit. A lower value leaves more of the background and changes the voice less. |
+| `STT_DENOISE_ATTEN_DB` | `30` | The most that Hush may lower any part of the audio, in dB, from 0 to 100. 100 is no limit. 30 kept the first word of a command more often than 100 ([denoise.md](denoise.md#measured)). |
 | `STT_DENOISE_MODEL` | `/opt/hush/hush-dfnet16k-onnx.tar.gz` | Hush model bundle. The image contains it outside `/models`, so a mounted model folder does not hide it. |
 | `STT_DENOISE_LIB` | `/usr/lib/libweya_nc.so` | Hush library |
 
