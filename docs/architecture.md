@@ -8,6 +8,7 @@ The container runs one Rust server, `assistant-hub`, on one port (10300). It is 
 |---|---|---|
 | `assistant-hub` (Rust, tokio, axum on hyper) | Main process, under `tini` | 10300, all interfaces |
 | STT: parakeet.cpp | Inside `assistant-hub`, through the C API of `libparakeet.so` | none |
+| STT cleanup: Hush (optional) | Inside `assistant-hub` on the CPU, through the C API of `libweya_nc.so` | none |
 | Web search: SearXNG | Inside `assistant-hub`, as a Python library through PyO3. SearXNG's own web server never starts. | none |
 | TTS: audiocpp_server | Child process. The hub restarts it after an exit. | 127.0.0.1:8100 |
 | LLM: llama-server of llama.cpp or of ik_llama.cpp | Child process, one of the two at a time. It starts only with a model setting. | 127.0.0.1:8081 |
@@ -32,7 +33,7 @@ A client that sends nothing for 30 s is dropped.
 
 | Route | Purpose |
 |---|---|
-| `GET /health` | Status of STT, TTS, LLM, web search and YouTube search. The hub probes STT and TTS directly and the LLM through `/health` of llama-server. If llama-server does not answer in 3 s while a request runs, the LLM is `busy`, which is no fault. The answer is 503 unless `status` is `ok`. The Docker health check uses it (`assistant-hub healthcheck`). |
+| `GET /health` | Status of STT, TTS, LLM, web search and YouTube search. `stt_denoise` says whether Hush is loaded. It is no fault when it is off. The hub probes STT and TTS directly and the LLM through `/health` of llama-server. If llama-server does not answer in 3 s while a request runs, the LLM is `busy`, which is no fault. The answer is 503 unless `status` is `ok`. The Docker health check uses it (`assistant-hub healthcheck`). |
 | `/llm/...` | Forwarded to llama-server without the `/llm` prefix. `/llm/v1/chat/completions` becomes `/v1/chat/completions`. Bodies stream in both directions, so server-sent events arrive token by token. With `LLM_API_KEY`, the server checks the key itself. |
 | `POST /mcp` | MCP server (Streamable HTTP, JSON responses) with all tools. A new tool is one more entry in `src/mcp.rs`, not a new endpoint. |
 | `GET /web/search?q=...&max_results=3` | Web search as JSON: the query as sent, the text that the MCP tool returns, and the results. |
@@ -42,7 +43,7 @@ A client that sends nothing for 30 s is dropped.
 
 ## Wyoming
 
-The `info` answer lists the services `parakeet` and `audiocpp`. STT collects the audio of a request as it arrives and converts it once at `audio-stop` to 16 kHz mono. TTS answers with `audio-start`, chunks of 4096 samples and `audio-stop`.
+The `info` answer lists the services `parakeet` and `audiocpp`. STT collects the audio of a request as it arrives and converts it once at `audio-stop` to 16 kHz mono. With `STT_DENOISE=hush`, Hush cleans that audio on the CPU before the GPU lock, and STT hears the cleaned audio. If Hush fails, STT hears the raw audio. TTS answers with `audio-start`, chunks of 4096 samples and `audio-stop`.
 
 STT and TTS share one GPU lock, so they never run on the GPU at the same time. Three GPU faults in a row ("device lost", HTTP 500 from audiocpp_server, a timeout of 120 s) make the server exit with an error. The restart policy of the container then starts it with a clean GPU state. Only the errors of an engine on the GPU count. On the CPU, a timeout comes from a long text on a slow CPU, and a restart does not help.
 
@@ -56,6 +57,7 @@ STT and TTS share one GPU lock, so they never run on the GPU at the same time. T
 | `src/server.rs` | Listener, first-byte check, HTTP routes |
 | `src/wyoming/` | Wyoming framing and the STT and TTS handler |
 | `src/stt.rs`, `src/tts.rs`, `src/audio.rs`, `src/gpu.rs` | parakeet.cpp binding, audiocpp client and text cleanup, PCM and WAV, GPU detection and GPU lock |
+| `src/denoise.rs` | Hush binding for the optional STT cleanup (`STT_DENOISE`) |
 | `src/llm/` | The engine choice (`engine.rs`) and the spec of the child process for each start (`specs.rs`), the arguments for llama.cpp (`llamacpp.rs`) and ik_llama.cpp (`ik.rs`) with the shared sampling values (`mod.rs`), the proxy, the prompt cache, the evaluation (`eval.rs`), and a fake llama-server for tests (`fake.rs`) |
 | `src/search.rs`, `src/youtube.rs`, `src/jellyfin.rs`, `src/mcp.rs` | SearXNG through PyO3, YouTube search, Jellyfin search, MCP |
 | `src/text.rs` | Matching of spoken names against titles, trigram similarity |
@@ -96,7 +98,7 @@ All of them take `--addr host:port` (default `127.0.0.1:10300`). In the containe
 The Dockerfile has these stages, all on Debian 13 "trixie":
 
 1. audio.cpp from source at a pinned commit. Debian ships `glslc`, so shaderc is not built from source.
-2. parakeet.cpp and llama.cpp as prebuilt Vulkan releases. ik_llama.cpp from source at a pinned commit, as one binary for any CPU with AVX2 and FMA (`scripts/build-ik-llama.sh`).
+2. parakeet.cpp and llama.cpp as prebuilt Vulkan releases. ik_llama.cpp from source at a pinned commit, as one binary for any CPU with AVX2 and FMA (`scripts/build-ik-llama.sh`). `libweya_nc.so` of Hush from source at a pinned commit, and its model bundle at a pinned revision with a SHA-256 check.
 3. The default STT and TTS models.
 4. SearXNG at a pinned commit, with its packages in `/opt/searxng/lib` for Python 3.13.
 5. `assistant-hub` with cargo-chef (pinned image tag). Its `build.rs` reads the llama.cpp headers of stage 2: the dependencies build in their own cached layer, so a code change rebuilds only the crate.
@@ -110,6 +112,6 @@ The Dockerfile has these stages, all on Debian 13 "trixie":
 |---|---|---|
 | `ci.yml` | Every push to a branch, every pull request, manual, and from `bump-pins.yml` | `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, a release build (all `--locked`), `cargo deny check all` (RustSec advisories, licenses, bans, sources), and the contract tests of llama.cpp and ik_llama.cpp (`engine-contract`) |
 | `image.yml` | Push to `main`, tags `v*`, manual | Calls `ci.yml` first. Builds with the registry cache and pushes to ghcr.io with provenance and SBOM attestations. |
-| `bump-pins.yml` | Every Monday, manual | For the pinned native components (llama.cpp, ik_llama.cpp, audio.cpp, parakeet.cpp, SearXNG) with a newer upstream version, `scripts/bump-pins.sh` changes the pins. The workflow opens one pull request on the branch `bump/pins` for all outdated components together, because the image contains them together. It starts `ci.yml` on the branch and test-builds the image without a push. A person merges. |
+| `bump-pins.yml` | Every Monday, manual | For the pinned native components (llama.cpp, ik_llama.cpp, audio.cpp, parakeet.cpp, SearXNG, Hush) with a newer upstream version, `scripts/bump-pins.sh` changes the pins. The workflow opens one pull request on the branch `bump/pins` for all outdated components together, because the image contains them together. It starts `ci.yml` on the branch and test-builds the image without a push. A person merges. |
 
 The toolchain version is in `rust-toolchain.toml` and in `docker-bake.hcl` (`RUST_VERSION`). The actions are pinned to commit SHAs. Dependabot proposes updates for crates, actions and base images every week. The Rust toolchain and cargo-chef are bumped by hand.

@@ -10,6 +10,7 @@ use serde_json::{Value, json};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, BufReader, BufWriter};
 
 use crate::audio::{self, Format};
+use crate::denoise::{self, Denoise};
 use crate::gpu::{Gpu, Speech};
 use crate::stt::{self, SpeechToText};
 use crate::tts::{self, TextToSpeech};
@@ -20,6 +21,8 @@ const CHUNK_SAMPLES: usize = 4096;
 
 pub struct Voice {
     pub stt: Option<Arc<dyn SpeechToText>>,
+    /// Cleans the audio before STT (`STT_DENOISE`). None: STT hears the raw audio.
+    pub denoise: Option<Arc<dyn Denoise>>,
     pub tts: Arc<dyn TextToSpeech>,
     pub gpu: Gpu,
     pub info: Value,
@@ -88,8 +91,35 @@ impl Voice {
         let Some(stt) = self.stt.clone() else {
             anyhow::bail!("STT is not available (the model failed to load, see the log)");
         };
+        let mut samples: Vec<f32> = pcm.iter().map(|&s| f32::from(s) / 32768.0).collect();
+        let mut cleaned = None;
+        if let Some(denoise) = self.denoise.clone() {
+            // On the CPU and before the GPU lock, so TTS never waits for it.
+            let (raw, result) = tokio::task::spawn_blocking(move || {
+                let start = std::time::Instant::now();
+                let result = denoise.clean(&samples);
+                (samples, result.map(|clean| (clean, start.elapsed())))
+            })
+            .await?;
+            samples = match result {
+                Ok((clean, took)) => {
+                    tracing::info!(
+                        "STT cleanup: {:.1} s of audio in {} ms",
+                        clean.len() as f32 / stt::RATE as f32,
+                        took.as_millis()
+                    );
+                    if self.debug_dir.is_some() {
+                        cleaned = Some(denoise::to_i16(&clean));
+                    }
+                    clean
+                }
+                Err(err) => {
+                    tracing::warn!("STT cleanup failed, STT hears the raw audio: {err:#}");
+                    raw
+                }
+            };
+        }
         let guard = self.gpu.acquire().await?;
-        let samples: Vec<f32> = pcm.iter().map(|&s| f32::from(s) / 32768.0).collect();
         let result = tokio::task::spawn_blocking(move || {
             let _guard = guard;
             stt.transcribe(&samples)
@@ -100,7 +130,9 @@ impl Voice {
                 self.gpu.success(Speech::Stt);
                 if let Some(dir) = self.debug_dir.clone() {
                     let text = text.clone();
-                    tokio::task::spawn_blocking(move || stt::save_debug_recording(&dir, &pcm, &text));
+                    tokio::task::spawn_blocking(move || {
+                        stt::save_debug_recording(&dir, &pcm, cleaned.as_deref(), &text)
+                    });
                 }
                 Ok(text)
             }

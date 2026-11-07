@@ -35,7 +35,11 @@ The image contains the default STT and TTS models. Mount a folder only to use ot
 | `STT_MODEL_FILENAME` | `parakeet-ctc-0.6b-q8_0.gguf` | Model file in `/models/stt` |
 | `STT_MODEL_NAME` | `parakeet-ctc-0.6b` | Model name that Home Assistant shows |
 | `PARAKEET_DEVICE` | empty | Device for STT: `Vulkan0`, `Vulkan1` or `cpu`. Empty selects the first Vulkan GPU, or the CPU if there is none. |
-| `STT_DEBUG_DIR` | empty | Folder for recordings of every STT request (WAV and transcript, newest 200). Use it to compare models on real requests, then turn it off. |
+| `STT_DEBUG_DIR` | empty | Folder for recordings of every STT request (WAV and transcript, newest 200). Use it to compare models on real requests, then turn it off. With `STT_DENOISE`, the audio that STT heard is next to each recording as `*-clean.wav`. |
+| `STT_DENOISE` | `off` | `hush` cleans the audio of each request with Hush before STT: noise and a competing speaker, such as a TV ([denoise.md](denoise.md)). |
+| `STT_DENOISE_ATTEN_DB` | `100` | The most that Hush may lower any part of the audio, in dB, from 0 to 100. 100 is no limit. A lower value leaves more of the background and changes the voice less. |
+| `STT_DENOISE_MODEL` | `/opt/hush/hush-dfnet16k-onnx.tar.gz` | Hush model bundle. The image contains it outside `/models`, so a mounted model folder does not hide it. |
+| `STT_DENOISE_LIB` | `/usr/lib/libweya_nc.so` | Hush library |
 
 ## Text to speech (TTS)
 
@@ -127,6 +131,9 @@ The Dockerfile bakes models and pins versions with these arguments. `docker-bake
 | `SEARXNG_COMMIT` | `10db664f14bc34565d4fd6ca6d846b6f932976aa` | SearXNG commit that the image contains |
 | `AUDIOCPP_COMMIT` | `bee4f364b687c34d918048243731d34b091ee7a7` | audio.cpp commit that the image builds |
 | `PARAKEET_VERSION` | `v0.6.1` | parakeet.cpp release that the image contains |
+| `HUSH_COMMIT` | `9f6414e91461a8f4bdf9840c0cdcdcb7da986339` | Hush commit that the image builds `libweya_nc.so` from |
+| `HUSH_MODEL_REVISION` | `a55d932cbf6344d284ac985f21e7f6e5bc4d38a5` | Revision of `weya-ai/hush` on Hugging Face for the model bundle |
+| `HUSH_MODEL_SHA256` | `45632ccaa82b71bb743d6caa7c78e983fe2f2790a3af7f6ec48e6ed7ba085df6` | SHA-256 of the model bundle. The build fails if the download differs. |
 | `RUST_VERSION` | `1.99.1` | Rust toolchain of the build. Keep it the same as in `rust-toolchain.toml`. |
 
 The full STT and TTS URLs start with `https://huggingface.co/`. The TTS URLs are in the repo `audio-cpp/audio.cpp-gguf`.

@@ -8,15 +8,16 @@
 #   scripts/bump-pins.sh                    # update all pins in the working tree
 #   scripts/bump-pins.sh llamacpp parakeet  # update only these components
 #
-# Components: llamacpp, ikllama, audiocpp, parakeet, searxng. The Rust toolchain and
-# cargo-chef are not handled here (skill bump-native-engine).
+# Components: llamacpp, ikllama, audiocpp, parakeet, searxng, hush. The Rust
+# toolchain, cargo-chef and the Hush model bundle are not handled here (skill
+# bump-native-engine).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 check=0
 if [ "${1:-}" = "--check" ]; then check=1; shift; fi
 components=("$@")
-if [ ${#components[@]} -eq 0 ]; then components=(llamacpp ikllama audiocpp parakeet searxng); fi
+if [ ${#components[@]} -eq 0 ]; then components=(llamacpp ikllama audiocpp parakeet searxng hush); fi
 
 variable() {
   case "$1" in
@@ -25,6 +26,7 @@ variable() {
     audiocpp) echo AUDIOCPP_COMMIT ;;
     parakeet) echo PARAKEET_VERSION ;;
     searxng) echo SEARXNG_COMMIT ;;
+    hush) echo HUSH_COMMIT ;;
     *) echo "unknown component: $1" >&2; return 1 ;;
   esac
 }
@@ -48,6 +50,7 @@ latest() {
     ikllama) gh api repos/ikawrakow/ik_llama.cpp/commits/HEAD --jq .sha ;;
     audiocpp) gh api repos/0xShug0/audio.cpp/commits/HEAD --jq .sha ;;
     searxng) gh api repos/searxng/searxng/commits/HEAD --jq .sha ;;
+    hush) gh api repos/pulp-vision/Hush/commits/HEAD --jq .sha ;;
   esac
 }
 

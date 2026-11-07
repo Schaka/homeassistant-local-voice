@@ -92,6 +92,7 @@ async fn health(State(app): State<Shared>) -> Response {
         axum::Json(json!({
             "status": if ok { "ok" } else { "degraded" },
             "stt": stt,
+            "stt_denoise": app.voice.denoise.is_some(),
             "tts": tts,
             "llm": llm,
             "web_search": app.web_search.is_some(),
@@ -401,6 +402,7 @@ mod tests {
     async fn start_with(tts_healthy: bool, llm: Option<LlmProxy>) -> (SocketAddr, CancellationToken) {
         let voice = Arc::new(Voice {
             stt: Some(Arc::new(FakeStt)),
+            denoise: None,
             tts: Arc::new(FakeTts(tts_healthy)),
             gpu: crate::gpu::Gpu::new(CancellationToken::new(), true, true),
             info: crate::wyoming::info("stt-model", "alba", &["en".to_owned()]),

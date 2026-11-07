@@ -1,13 +1,13 @@
 ---
 name: bump-native-engine
-description: Use when a pinned upstream version changes. That means the pull request of the workflow Bump pins (branch bump/pins), a Dependabot pull request, a request to update llama.cpp, ik_llama.cpp, parakeet.cpp, audio.cpp, SearXNG, the Rust toolchain or cargo-chef, an edit of LLAMACPP_BUILD, IKLLAMA_COMMIT, AUDIOCPP_COMMIT, PARAKEET_VERSION, SEARXNG_COMMIT, RUST_VERSION or CARGO_CHEF_VERSION in docker-bake.hcl, and a failed Image or CI run right after such a bump. Reads the release notes, checks the code that depends on the component and tests the image.
+description: Use when a pinned upstream version changes. That means the pull request of the workflow Bump pins (branch bump/pins), a Dependabot pull request, a request to update llama.cpp, ik_llama.cpp, parakeet.cpp, audio.cpp, SearXNG, Hush, the Rust toolchain or cargo-chef, an edit of LLAMACPP_BUILD, IKLLAMA_COMMIT, AUDIOCPP_COMMIT, PARAKEET_VERSION, SEARXNG_COMMIT, HUSH_COMMIT, HUSH_MODEL_REVISION, RUST_VERSION or CARGO_CHEF_VERSION in docker-bake.hcl, and a failed Image or CI run right after such a bump. Reads the release notes, checks the code that depends on the component and tests the image.
 ---
 
 # Bump a pinned component
 
 All versions are in `docker-bake.hcl`. The Dockerfile repeats them as `ARG` defaults, and `docs/configuration.md` lists them. Change all three places.
 
-The workflow "Bump pins" does this for llama.cpp, ik_llama.cpp, audio.cpp, parakeet.cpp and SearXNG every Monday (`scripts/bump-pins.sh`). It opens one pull request on the branch `bump/pins` that changes all outdated pins together, because the image contains them together. It starts CI on the branch and test-builds the image. `scripts/bump-pins.sh --check` lists the outdated pins locally. For such a pull request, do the steps of each changed component below, then merge. If one component breaks the build, fix the cause on `main` first (for example in `src/llm/template.rs`) and run the workflow again, because each run builds the branch anew from `main`. The Rust toolchain and cargo-chef are bumped by hand.
+The workflow "Bump pins" does this for llama.cpp, ik_llama.cpp, audio.cpp, parakeet.cpp, SearXNG and Hush every Monday (`scripts/bump-pins.sh`). It opens one pull request on the branch `bump/pins` that changes all outdated pins together, because the image contains them together. It starts CI on the branch and test-builds the image. `scripts/bump-pins.sh --check` lists the outdated pins locally. For such a pull request, do the steps of each changed component below, then merge. If one component breaks the build, fix the cause on `main` first (for example in `src/llm/template.rs`) and run the workflow again, because each run builds the branch anew from `main`. The Rust toolchain, cargo-chef and the Hush model bundle are bumped by hand.
 
 ## llama.cpp (`LLAMACPP_BUILD`)
 
@@ -40,6 +40,13 @@ The workflow "Bump pins" does this for llama.cpp, ik_llama.cpp, audio.cpp, parak
 
 1. Check `searx/search/__init__.py` and `searx/search/models.py` for changes to `initialize`, `Search` and `SearchQuery`, which the bootstrap in `src/search.rs` calls.
 2. After the build: `curl "http://<host>:10300/web/search?q=capital%20of%20australia"` returns results.
+
+## Hush (`HUSH_COMMIT`, `HUSH_MODEL_REVISION`, `HUSH_MODEL_SHA256`)
+
+1. Check the C API in `native/weya_nc_build/weya_nc/include/weya_nc.h` against `src/denoise.rs`, and the frame and delay rules in its `src/lib.rs` (160 samples at 16 kHz, one frame of delay).
+2. The library builds with its own `Cargo.lock` (`cargo build --locked` in the stage `hush-builder`). If a new Rust toolchain breaks it, keep `HUSH_COMMIT` and report it upstream.
+3. A new model revision: download the bundle, write its SHA-256 into `HUSH_MODEL_SHA256` and run the steps of "Check it on your rooms" in `docs/denoise.md` on recordings with a TV.
+4. After the build: start the image with `STT_DENOISE=hush`. The log shows `STT cleanup loaded`, and `/health` shows `"stt_denoise": true`.
 
 ## Rust and cargo-chef (`RUST_VERSION`, `CARGO_CHEF_VERSION`)
 

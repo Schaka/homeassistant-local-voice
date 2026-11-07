@@ -6,6 +6,7 @@
 
 mod audio;
 mod config;
+mod denoise;
 mod gguf;
 mod gpu;
 mod jellyfin;
@@ -397,6 +398,21 @@ async fn run(cfg: Config) -> Result<bool> {
             }
         };
 
+    // Optional cleanup of the STT audio (Hush), in this process on the CPU.
+    // A failure leaves STT on the raw audio, it never stops the server.
+    let denoise: Option<Arc<dyn denoise::Denoise>> = match cfg.stt.denoise.clone() {
+        Some(d) => {
+            match tokio::task::spawn_blocking(move || denoise::Hush::load(&d.lib, &d.model, d.atten_lim_db)).await? {
+                Ok(h) => Some(Arc::new(h)),
+                Err(err) => {
+                    tracing::error!("STT cleanup is not available, STT hears the raw audio: {err:#}");
+                    None
+                }
+            }
+        }
+        None => None,
+    };
+
     // Web search, SearXNG in this process.
     let web_search: Option<Arc<dyn SearchBackend>> = match cfg.search.clone() {
         Some(search_cfg) => match tokio::task::spawn_blocking(move || search::SearXng::load(&search_cfg)).await? {
@@ -431,6 +447,7 @@ async fn run(cfg: Config) -> Result<bool> {
 
     let voice = Arc::new(wyoming::Voice {
         stt,
+        denoise,
         tts,
         gpu: gpu::Gpu::new(gpu_lost.clone(), stt_on_gpu, tts_on_gpu),
         info: wyoming::info(&cfg.stt.model_name, &cfg.tts.voice_id, &cfg.tts.languages_bcp),

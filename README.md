@@ -7,6 +7,7 @@ A self-hosted voice assistant backend for Home Assistant in one container and on
 | Feature | Engine | Default |
 |---|---|---|
 | Speech to text (STT) | [parakeet.cpp](https://github.com/mudler/parakeet.cpp) with NVIDIA Parakeet CTC 0.6B | On |
+| STT cleanup | [Hush](https://github.com/pulp-vision/Hush) removes noise and a competing speaker, such as a TV, before STT ([docs/denoise.md](docs/denoise.md)) | Off |
 | Text to speech (TTS) | [audio.cpp](https://github.com/0xShug0/audio.cpp) with PocketTTS-100M | On |
 | Conversation agent (LLM) | [llama.cpp](https://github.com/ggml-org/llama.cpp) llama-server, or [ik_llama.cpp](https://github.com/ikawrakow/ik_llama.cpp) on the CPU for the models it is verified for, with Ling-3.0-tiny, MiniCPM5-2B, LFM3-1.7B and others | Off. A model setting starts it. |
 | Web search tool for the agent | [SearXNG](https://github.com/searxng/searxng), embedded as a library (no SearXNG server) | Off |
@@ -81,6 +82,7 @@ Without a GPU, leave out the `--device` and `--group-add` lines. Speech then run
 ## Attributions
 
 - [parakeet.cpp](https://github.com/mudler/parakeet.cpp): ggml Parakeet ASR (Apache-2.0). Models from [NVIDIA NeMo](https://github.com/NVIDIA-NeMo/NeMo).
+- [Hush](https://github.com/pulp-vision/Hush) by Weya: speech enhancement with background speaker suppression (Apache-2.0), built on [DeepFilterNet](https://github.com/Rikorose/DeepFilterNet) (MIT or Apache-2.0).
 - [audio.cpp](https://github.com/0xShug0/audio.cpp): ggml audio engine. PocketTTS by [Kyutai](https://github.com/Kyutai-Labs/pocket-tts) (Apache-2.0).
 - [llama.cpp](https://github.com/ggml-org/llama.cpp): llama-server (MIT).
 - [ik_llama.cpp](https://github.com/ikawrakow/ik_llama.cpp): llama-server with faster CPU code (MIT).

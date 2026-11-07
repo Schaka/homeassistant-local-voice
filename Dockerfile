@@ -132,6 +132,32 @@ COPY Cargo.toml Cargo.lock build.rs ./
 COPY src src
 RUN cargo chef prepare --recipe-path recipe.json
 
+# ============================================================================
+# Hush (optional STT cleanup, STT_DENOISE=hush): libweya_nc.so from the pinned
+# Hush commit, the upstream C wrapper around DeepFilterNet's df crate with
+# tract (pure Rust, no ONNX Runtime). The 16 kHz model bundle comes from a
+# pinned Hugging Face revision and must match its SHA-256. Both go outside
+# /models, so a mounted model folder does not hide them.
+# ============================================================================
+FROM chef AS hush-builder
+ARG HUSH_COMMIT=9f6414e91461a8f4bdf9840c0cdcdcb7da986339
+ARG HUSH_MODEL_REVISION=a55d932cbf6344d284ac985f21e7f6e5bc4d38a5
+ARG HUSH_MODEL_SHA256=45632ccaa82b71bb743d6caa7c78e983fe2f2790a3af7f6ec48e6ed7ba085df6
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /hush
+# Only native/ is checked out: the repository also holds checkpoints and binaries.
+RUN git init -q . \
+    && git remote add origin https://github.com/pulp-vision/Hush \
+    && git fetch -q --depth 1 --filter=blob:none origin "${HUSH_COMMIT}" \
+    && git checkout -q FETCH_HEAD -- native
+RUN cd native/weya_nc_build/weya_nc \
+    && cargo build --release --locked \
+    && install -m644 target/release/libweya_nc.so /libweya_nc.so
+RUN curl -fsSL --retry 3 -o /hush-dfnet16k-onnx.tar.gz \
+        "https://huggingface.co/weya-ai/hush/resolve/${HUSH_MODEL_REVISION}/onnx/advanced_dfnet16k_model_best_onnx.tar.gz" \
+    && echo "${HUSH_MODEL_SHA256}  /hush-dfnet16k-onnx.tar.gz" | sha256sum -c -
+
 FROM chef AS rust-builder
 # PyO3 links against libpython3.13 of the runtime base. bindgen (build.rs)
 # needs libclang and the llama.cpp headers of the image.
@@ -165,10 +191,12 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
 
 COPY --from=audiocpp-builder /audio.cpp/build/linux-vulkan-release/bin/audiocpp_server /usr/local/bin/audiocpp_server
 COPY --from=parakeet-stage /libparakeet.so /usr/lib/libparakeet.so
+COPY --from=hush-builder /libweya_nc.so /usr/lib/libweya_nc.so
+COPY --from=hush-builder /hush-dfnet16k-onnx.tar.gz /opt/hush/hush-dfnet16k-onnx.tar.gz
 COPY --from=llamacpp-stage /llama.cpp /opt/llama.cpp
 COPY --from=ikllama-builder /ik_llama.cpp/build/bin/llama-server /opt/ik_llama.cpp/llama-server
 # Fail the build here, not at runtime, if a shared library is missing.
-RUN ! ldd /opt/llama.cpp/llama-server /opt/ik_llama.cpp/llama-server /opt/llama.cpp/*.so /usr/local/bin/audiocpp_server /usr/lib/libparakeet.so \
+RUN ! ldd /opt/llama.cpp/llama-server /opt/ik_llama.cpp/llama-server /opt/llama.cpp/*.so /usr/local/bin/audiocpp_server /usr/lib/libparakeet.so /usr/lib/libweya_nc.so \
         | grep 'not found'
 COPY --from=models-stage /models /models
 COPY --from=searxng-stage /opt/searxng /opt/searxng

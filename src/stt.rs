@@ -129,30 +129,42 @@ impl Drop for Parakeet {
 /// How many recordings `STT_DEBUG_DIR` keeps.
 const DEBUG_KEEP: usize = 200;
 
-/// Saves one STT request as a 16 kHz mono WAV plus its transcript. Only the
-/// newest 200 stay. The recordings contain everything that was said after the
-/// wake word, so the option is off by default.
-pub fn save_debug_recording(dir: &Path, pcm: &[i16], text: &str) {
-    if let Err(err) = save_debug_inner(dir, pcm, text) {
+/// Saves one STT request as a 16 kHz mono WAV plus its transcript. With
+/// `STT_DENOISE`, the audio that STT heard goes next to it as `*-clean.wav`.
+/// Only the newest 200 requests stay. The recordings contain everything that
+/// was said after the wake word, so the option is off by default.
+pub fn save_debug_recording(dir: &Path, pcm: &[i16], cleaned: Option<&[i16]>, text: &str) {
+    if let Err(err) = save_debug_inner(dir, pcm, cleaned, text) {
         // A full or read-only disk must never break STT.
         tracing::warn!("STT debug recording failed: {err}");
     }
 }
 
-fn save_debug_inner(dir: &Path, pcm: &[i16], text: &str) -> Result<()> {
+fn save_debug_inner(dir: &Path, pcm: &[i16], cleaned: Option<&[i16]>, text: &str) -> Result<()> {
     std::fs::create_dir_all(dir)?;
     let stem = chrono::Local::now().format("%Y%m%d-%H%M%S-%3f").to_string();
     std::fs::write(dir.join(format!("{stem}.wav")), crate::audio::wav_bytes(pcm, RATE, 1))?;
+    if let Some(clean) = cleaned {
+        std::fs::write(
+            dir.join(format!("{stem}-clean.wav")),
+            crate::audio::wav_bytes(clean, RATE, 1),
+        )?;
+    }
     std::fs::write(dir.join(format!("{stem}.txt")), format!("{text}\n"))?;
     let mut wavs: Vec<PathBuf> = std::fs::read_dir(dir)?
         .filter_map(|e| e.ok().map(|e| e.path()))
         .filter(|p| p.extension().is_some_and(|x| x == "wav"))
+        .filter(|p| !p.to_string_lossy().ends_with("-clean.wav"))
         .collect();
     wavs.sort();
     if wavs.len() > DEBUG_KEEP {
         for old in &wavs[..wavs.len() - DEBUG_KEEP] {
             let _ = std::fs::remove_file(old);
             let _ = std::fs::remove_file(old.with_extension("txt"));
+            let _ = std::fs::remove_file(old.with_file_name(format!(
+                "{}-clean.wav",
+                old.file_stem().unwrap_or_default().to_string_lossy()
+            )));
         }
     }
     Ok(())

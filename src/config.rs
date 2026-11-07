@@ -30,6 +30,16 @@ pub struct SttConfig {
     /// `PARAKEET_DEVICE`. None: the first Vulkan GPU, or the CPU without one.
     pub device: Option<String>,
     pub debug_dir: Option<PathBuf>,
+    /// `STT_DENOISE=hush`: Hush cleans the audio before STT. None: off.
+    pub denoise: Option<DenoiseConfig>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DenoiseConfig {
+    pub lib: PathBuf,
+    pub model: PathBuf,
+    /// The most that Hush may lower any part of the signal, in dB. 100 is no limit.
+    pub atten_lim_db: f32,
 }
 
 /// Where TTS runs. `Auto` picks Vulkan when a Vulkan GPU exists, else the CPU.
@@ -378,6 +388,7 @@ impl Config {
             model_name: var_or("STT_MODEL_NAME", "parakeet-ctc-0.6b"),
             device: var("PARAKEET_DEVICE"),
             debug_dir: var("STT_DEBUG_DIR").map(PathBuf::from),
+            denoise: Self::denoise_from_env()?,
         };
 
         let tts = TtsConfig {
@@ -411,6 +422,24 @@ impl Config {
             jellyfin: Self::jellyfin_from_env()?,
             media: Self::media_from_env()?,
         })
+    }
+
+    fn denoise_from_env() -> Result<Option<DenoiseConfig>> {
+        match var_or("STT_DENOISE", "off").as_str() {
+            "off" => Ok(None),
+            "hush" => {
+                let atten_lim_db: f32 = parse_num("STT_DENOISE_ATTEN_DB", 100.0)?;
+                if !(0.0..=100.0).contains(&atten_lim_db) {
+                    bail!("STT_DENOISE_ATTEN_DB={atten_lim_db} is outside 0 to 100");
+                }
+                Ok(Some(DenoiseConfig {
+                    lib: PathBuf::from(var_or("STT_DENOISE_LIB", "/usr/lib/libweya_nc.so")),
+                    model: PathBuf::from(var_or("STT_DENOISE_MODEL", "/opt/hush/hush-dfnet16k-onnx.tar.gz")),
+                    atten_lim_db,
+                }))
+            }
+            other => bail!("unknown STT_DENOISE={other} (expected off or hush)"),
+        }
     }
 
     fn llm_from_env() -> Result<Option<LlmConfig>> {
@@ -579,6 +608,37 @@ mod tests {
             ..LlmConfig::for_test()
         };
         assert_eq!(cfg.slot_file(), "Ling_3_tiny_Q4-64k.slot");
+    }
+
+    // ---- the STT cleanup ----
+
+    fn denoise(vars: &[(&str, &str)]) -> Result<Option<DenoiseConfig>> {
+        with_test_env(vars, Config::denoise_from_env)
+    }
+
+    #[test]
+    fn stt_cleanup_is_off_by_default() {
+        assert!(denoise(&[]).unwrap().is_none());
+        assert!(denoise(&[("STT_DENOISE", "off")]).unwrap().is_none());
+    }
+
+    #[test]
+    fn stt_cleanup_with_hush() {
+        let d = denoise(&[("STT_DENOISE", "hush")]).unwrap().unwrap();
+        assert_eq!(d.lib, PathBuf::from("/usr/lib/libweya_nc.so"));
+        assert_eq!(d.model, PathBuf::from("/opt/hush/hush-dfnet16k-onnx.tar.gz"));
+        assert_eq!(d.atten_lim_db, 100.0);
+        let d = denoise(&[("STT_DENOISE", "hush"), ("STT_DENOISE_ATTEN_DB", "30")])
+            .unwrap()
+            .unwrap();
+        assert_eq!(d.atten_lim_db, 30.0);
+    }
+
+    #[test]
+    fn stt_cleanup_rejects_bad_values() {
+        assert!(denoise(&[("STT_DENOISE", "rnnoise")]).is_err());
+        assert!(denoise(&[("STT_DENOISE", "hush"), ("STT_DENOISE_ATTEN_DB", "-3")]).is_err());
+        assert!(denoise(&[("STT_DENOISE", "hush"), ("STT_DENOISE_ATTEN_DB", "loud")]).is_err());
     }
 
     // ---- the LLM variables ----

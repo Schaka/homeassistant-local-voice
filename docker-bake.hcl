@@ -79,6 +79,11 @@ variable "IKLLAMA_COMMIT" { default = "35e0be560a755221b8789f667b8aab134a36bc0c"
 variable "AUDIOCPP_COMMIT" { default = "bee4f364b687c34d918048243731d34b091ee7a7" }
 variable "PARAKEET_VERSION" { default = "v0.6.1" }
 variable "SEARXNG_COMMIT" { default = "10db664f14bc34565d4fd6ca6d846b6f932976aa" }
+# Hush (STT_DENOISE=hush): the libweya_nc source commit and the model bundle.
+# A new model revision needs its new SHA-256 and a new test (docs/denoise.md).
+variable "HUSH_COMMIT" { default = "9f6414e91461a8f4bdf9840c0cdcdcb7da986339" }
+variable "HUSH_MODEL_REVISION" { default = "a55d932cbf6344d284ac985f21e7f6e5bc4d38a5" }
+variable "HUSH_MODEL_SHA256" { default = "45632ccaa82b71bb743d6caa7c78e983fe2f2790a3af7f6ec48e6ed7ba085df6" }
 # Keep in sync with rust-toolchain.toml.
 variable "RUST_VERSION" { default = "1.99.1" }
 # cargo-chef image tag: <CARGO_CHEF_VERSION>-rust-<RUST_VERSION>-slim-trixie.
@@ -115,6 +120,9 @@ target "final" {
     AUDIOCPP_COMMIT    = "${AUDIOCPP_COMMIT}"
     PARAKEET_VERSION   = "${PARAKEET_VERSION}"
     SEARXNG_COMMIT     = "${SEARXNG_COMMIT}"
+    HUSH_COMMIT        = "${HUSH_COMMIT}"
+    HUSH_MODEL_REVISION = "${HUSH_MODEL_REVISION}"
+    HUSH_MODEL_SHA256  = "${HUSH_MODEL_SHA256}"
     RUST_VERSION       = "${RUST_VERSION}"
     CARGO_CHEF_VERSION = "${CARGO_CHEF_VERSION}"
     LLM_MODEL_URL      = "${LLM_MODEL_URL}"
