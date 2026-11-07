@@ -41,7 +41,7 @@ Hush changes what STT hears, so test it with your own satellites before you leav
 
 ## Measured
 
-Test set: 8 voice commands spoken by PocketTTS (lights, sensors, music, shopping list, weather, timer, TV, YouTube), each with 0.5 s of audio before and after it. The background is Japanese news speech ("Spoken Wikinews - Japanese 001", CC BY 4.0, Wikimedia Commons), a different part for each command. SIR is the level of the command above the background. STT is Parakeet TDT 1.1B Q8_0 on an Intel UHD 730, through `assistant-hub probe stt`. A command counts only if the transcript is exactly right. Measured on 2026-11-07.
+Test set: 8 voice commands spoken by PocketTTS (lights, sensors, music, shopping list, weather, timer, TV, YouTube), each with 0.5 s of audio before and after it. The background is Japanese news speech ("Spoken Wikinews - Japanese 001", CC BY 4.0, Wikimedia Commons), a different part for each command. SIR is the level of the command above the background. STT is Parakeet TDT 1.1B Q8_0 on an Intel UHD Graphics 770, through `assistant-hub probe stt`. A command counts only if the transcript is exactly right. Measured on 2026-11-07.
 
 | Background | Raw audio | Hush, 100 dB limit | Hush, 30 dB limit |
 |---|---|---|---|
