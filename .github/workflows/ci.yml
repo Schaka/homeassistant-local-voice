@@ -42,6 +42,10 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.13'
+      # The full path holds the patch version. PyO3 configures its build again
+      # when PYO3_PYTHON changes, so the cached target/ never links against the
+      # folder of an older Python.
+      - run: echo "PYO3_PYTHON=$pythonLocation/bin/python3.13" >> "$GITHUB_ENV"
       # Reads rust-toolchain.toml, denies warnings and caches ~/.cargo and target/.
       - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
       # build.rs generates the llama.cpp bindings with bindgen (libclang) from
@@ -65,6 +69,10 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.13'
+      # The full path holds the patch version. PyO3 configures its build again
+      # when PYO3_PYTHON changes, so the cached target/ never links against the
+      # folder of an older Python.
+      - run: echo "PYO3_PYTHON=$pythonLocation/bin/python3.13" >> "$GITHUB_ENV"
       - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
       - run: sudo apt-get update -q && sudo apt-get install -y -q libclang-dev libgomp1 cmake
       - run: ./scripts/fetch-llama-headers.sh
