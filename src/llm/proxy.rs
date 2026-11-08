@@ -47,6 +47,8 @@ pub struct LlmProxy {
     in_flight: Arc<AtomicUsize>,
     /// Repeat an empty chat reply once with thinking off.
     retry_empty: bool,
+    /// Move the area line of Home Assistant to the last user message.
+    area_in_user: bool,
 }
 
 /// The state of llama-server, from its own `/health`.
@@ -117,7 +119,14 @@ impl LlmProxy {
             api_key,
             in_flight: Arc::default(),
             retry_empty: false,
+            area_in_user: false,
         })
+    }
+
+    /// Turns the move of the area line on or off, see `area_to_user_message`.
+    pub fn with_area_in_user(mut self, on: bool) -> Self {
+        self.area_in_user = on;
+        self
     }
 
     /// Turns the repeat of empty chat replies on or off.
@@ -161,7 +170,7 @@ impl LlmProxy {
         let in_flight = InFlight::new(&self.in_flight);
         let path = backend_path(&parts.uri);
         let url = format!("{}{}", self.backend, path);
-        if self.retry_empty && parts.method == Method::POST && is_chat_path(&path) {
+        if (self.retry_empty || self.area_in_user) && parts.method == Method::POST && is_chat_path(&path) {
             return self.forward_chat(&parts.headers, url, body, in_flight).await;
         }
         let method = reqwest::Method::from_bytes(parts.method.as_str().as_bytes()).unwrap_or(reqwest::Method::GET);
@@ -196,7 +205,18 @@ impl LlmProxy {
                 "invalid_request_error",
             );
         };
-        let retry_body = without_thinking(&bytes);
+        // The prompt of the model is the same for every satellite, so that one
+        // cached prefix serves all of them.
+        let bytes = if self.area_in_user {
+            area_to_user_message(&bytes).unwrap_or(bytes)
+        } else {
+            bytes
+        };
+        let retry_body = if self.retry_empty {
+            without_thinking(&bytes)
+        } else {
+            None
+        };
         let resp = match self
             .outgoing(reqwest::Method::POST, &url, headers)
             .body(bytes)
@@ -456,6 +476,39 @@ fn without_thinking(body: &[u8]) -> Option<Bytes> {
         return None;
     }
     kwargs.insert("enable_thinking".into(), Value::Bool(false));
+    serde_json::to_vec(&v).ok().map(Bytes::from)
+}
+
+/// Home Assistant writes "You are in area X (floor Y) and all generic
+/// commands ... should target this area." into the system message, before the
+/// tools. That line differs for each satellite, so the cached prefix (about
+/// 7,000 tokens, 17 to 30 s of prefill on the CPU) would hold for one satellite
+/// only. This moves the line to the front of the last user message. The system
+/// message and the tools are then the same for every satellite. `None` if the
+/// body has no such line, so the request goes on unchanged.
+fn area_to_user_message(body: &[u8]) -> Option<Bytes> {
+    const MARK: &str = "You are in area ";
+    let mut v: Value = serde_json::from_slice(body).ok()?;
+    let messages = v.get_mut("messages")?.as_array_mut()?;
+    // Cut the line out of the system message.
+    let mut line = None;
+    for m in messages.iter_mut().filter(|m| m["role"] == "system") {
+        let Some(text) = m["content"].as_str() else {
+            continue;
+        };
+        let Some(start) = text.find(MARK).filter(|i| *i == 0 || text.as_bytes()[i - 1] == b'\n') else {
+            continue;
+        };
+        let end = text[start..].find('\n').map_or(text.len(), |n| start + n + 1);
+        line = Some(text[start..end].trim_end().to_owned());
+        m["content"] = Value::String(format!("{}{}", &text[..start], &text[end..]));
+        break;
+    }
+    let line = line?;
+    // Put it in front of the last user message. Without a user message, the request stays as sent.
+    let user = messages.iter_mut().rev().find(|m| m["role"] == "user")?;
+    let text = user["content"].as_str()?.to_owned();
+    user["content"] = Value::String(format!("({line})\n{text}"));
     serde_json::to_vec(&v).ok().map(Bytes::from)
 }
 
@@ -840,5 +893,71 @@ mod tests {
         assert!(without_thinking(br#"{"chat_template_kwargs":{"enable_thinking":false}}"#).is_none());
         assert!(is_chat_path("/v1/chat/completions"));
         assert!(!is_chat_path("/v1/models"));
+    }
+
+    #[test]
+    fn the_area_line_moves_to_the_last_user_message() {
+        let body = br#"{"messages":[
+            {"role":"system","content":"Intro\nWhen controlling Home Assistant always call the intent tools.\nYou are in area Kitchen (floor Downstairs) and all generic commands should target this area.\n\nFollow these instructions."},
+            {"role":"user","content":"first"},
+            {"role":"assistant","content":"ok"},
+            {"role":"user","content":"turn on the lights"}]}"#;
+        let out: Value = serde_json::from_slice(&area_to_user_message(body).unwrap()).unwrap();
+        let system = out["messages"][0]["content"].as_str().unwrap();
+        assert!(!system.contains("You are in area"), "{system}");
+        assert!(system.contains("intent tools.\n\nFollow these"), "{system}");
+        assert_eq!(out["messages"][1]["content"], "first");
+        let last = out["messages"][3]["content"].as_str().unwrap();
+        assert!(
+            last.starts_with("(You are in area Kitchen (floor Downstairs)"),
+            "{last}"
+        );
+        assert!(last.ends_with("\nturn on the lights"), "{last}");
+        // The system messages of two satellites are the same afterwards.
+        let other = br#"{"messages":[{"role":"system","content":"Intro\nWhen controlling Home Assistant always call the intent tools.\nYou are in area Bedroom (floor Upstairs) and all generic commands should target this area.\n\nFollow these instructions."},{"role":"user","content":"x"}]}"#;
+        let other: Value = serde_json::from_slice(&area_to_user_message(other).unwrap()).unwrap();
+        assert_eq!(other["messages"][0]["content"], out["messages"][0]["content"]);
+        // No line, no user message, no JSON: unchanged.
+        assert!(
+            area_to_user_message(
+                br#"{"messages":[{"role":"system","content":"Intro"},{"role":"user","content":"x"}]}"#
+            )
+            .is_none()
+        );
+        assert!(
+            area_to_user_message(br#"{"messages":[{"role":"system","content":"You are in area A (floor B) x."}]}"#)
+                .is_none()
+        );
+        assert!(area_to_user_message(b"nope").is_none());
+    }
+
+    #[tokio::test]
+    async fn the_proxy_sends_the_area_line_in_the_user_message() {
+        let fake = Fake::default();
+        let proxy = proxy_to_fake(&fake, None).await.with_area_in_user(true);
+        let body = r#"{"stream":false,"messages":[{"role":"system","content":"A\nYou are in area Hallway (floor Downstairs) and x.\nB"},{"role":"user","content":"hi"}]}"#;
+        let resp = proxy
+            .forward(request("POST", "/llm/v1/chat/completions", Body::from(body)))
+            .await;
+        assert_eq!(resp.status(), 200);
+        let seen = fake.seen_with("/v1/chat/completions");
+        let sent: Value = serde_json::from_slice(&seen[0].body).unwrap();
+        assert_eq!(sent["messages"][0]["content"], "A\nB");
+        assert!(
+            sent["messages"][1]["content"]
+                .as_str()
+                .unwrap()
+                .starts_with("(You are in area Hallway")
+        );
+        // Off: the body arrives as sent.
+        let fake = Fake::default();
+        let proxy = proxy_to_fake(&fake, None).await;
+        proxy
+            .forward(request("POST", "/llm/v1/chat/completions", Body::from(body)))
+            .await;
+        assert!(
+            String::from_utf8_lossy(&fake.seen_with("/v1/chat/completions")[0].body)
+                .contains("A\\nYou are in area Hallway")
+        );
     }
 }

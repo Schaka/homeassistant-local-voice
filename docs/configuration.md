@@ -78,6 +78,7 @@ Set `LLM_HF_REPO` or `LLM_MODEL_FILENAME`, not both. With neither, llama-server 
 | `LLM_SLOT_CACHE` | `on` | Keeps the prompt cache across restarts in `/models/llm/slots`. `off` disables it. |
 | `LLM_TEMPLATE_FIX` | `on` | For `ling3`, `lfm3` and `minicpm5`: patch the chat template from the model file so that no new thinking starts after a tool result. Ling otherwise often returns empty answers, and LFM3 and MiniCPM5 need about twice as long. `off` uses the template unchanged. See [llm.md](llm.md#the-tool-result-fix-of-the-chat-templates). |
 | `LLM_RETRY_EMPTY` | `on` | Applies when `LLM_REASONING=on`. If a chat reply has no text and no tool call, the hub repeats the request once with thinking off (`chat_template_kwargs.enable_thinking=false`). Ling sometimes writes its tool call as text into its thinking, and Home Assistant then answers "Unable to get response". `off` passes such a reply on. See [llm.md](llm.md#empty-replies-and-the-repeat). |
+| `LLM_AREA_IN_USER` | `on` | Home Assistant writes "You are in area X (floor Y) and all generic commands ... should target this area." into the system message, before the tools. It differs for each satellite. With `on`, the proxy moves that line to the front of the last user message, so the system message and the tools are the same for every satellite and one cached prompt serves them all. `off` sends the request as it is. See [llm.md](llm.md#one-prompt-cache-for-all-satellites). |
 | `HF_TOKEN` | empty | Token for gated Hugging Face repos |
 
 ## Web search

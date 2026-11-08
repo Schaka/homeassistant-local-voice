@@ -381,7 +381,8 @@ async fn run(cfg: Config) -> Result<bool> {
             }
             Some(
                 llm::proxy::LlmProxy::new(llm_cfg.internal_port, llm_cfg.api_key.clone())?
-                    .with_retry_empty(llm_cfg.reasoning && llm_cfg.retry_empty),
+                    .with_retry_empty(llm_cfg.reasoning && llm_cfg.retry_empty)
+                    .with_area_in_user(llm_cfg.area_in_user),
             )
         }
         None => None,

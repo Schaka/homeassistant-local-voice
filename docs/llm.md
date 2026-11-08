@@ -217,6 +217,16 @@ With `LLM_RETRY_EMPTY=on` and thinking on, the proxy in `src/llm/proxy.rs` watch
 
 The repeat costs about the time of a request with a cached prompt (prefill of the last 60 to 70 tokens, 8 generated tokens for a tool call). Without thinking, a tool call took 8 tokens instead of 33 on the Unraid server.
 
+## One prompt cache for all satellites
+
+The prompt of a Home Assistant request has this order: the instructions, the list of exposed entities, the area line of the satellite, the tools (about 21,000 characters), the history, the question. About 7,000 tokens come before the question. llama-server keeps the processed prompt of the slot. A new request reuses it up to the first different token, and a model with recurrent layers like Ling must process everything after a difference again. The area line ("You are in area Living Room (floor Downstairs) ...") differs for each satellite and sits before the tools. A request from another satellite therefore processed the whole prompt: 7,842 tokens in 17 to 31 s on the Unraid CPU, instead of 60 to 260 tokens for a cached prompt.
+
+With `LLM_AREA_IN_USER=on`, the proxy removes that line from the system message and puts it in front of the last user message: `(You are in area Kitchen (floor Downstairs) ...)` and the question on the next line. All satellites then share the cached prefix, and only the last message differs. The same line goes into the last user message of each round of a request, so the cached history stays the same. A request without that line (no satellite) passes unchanged.
+
+llama-server also keeps earlier prompts in a RAM cache (`--cache-ram`, 8 GiB by default). It is empty after each start. The slot file that the hub restores holds one prompt.
+
+A change of the instructions, the exposed entities or the tools changes the prefix. The next request then processes the new prompt once. To pay that cost in the background, send one request after the change: the Home Assistant automation `llm_prompt_warmup` of the setup repository does this.
+
 ## Speed settings per family
 
 Measured on 2026-11-01 with 10 Home Assistant style questions: a question, a tool call, the tool result, the answer (lights, weather, sensor values, music, small talk). The history was sent the way Home Assistant sends it, without thinking. llama-server b11966, 6 threads of a Core Ultra 7 270K. The time is the mean per question after the first one, which also prefills the whole prompt.
