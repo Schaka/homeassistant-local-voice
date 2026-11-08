@@ -138,7 +138,7 @@ The script tries TizenTube, SmartTube and the YouTube app, in this order. Boxes 
 | Problem | Cause and fix |
 |---|---|
 | The first answer takes minutes | The full prompt is prefilled once after each prompt change. Later answers use the cache. Make the prompt shorter: fewer exposed entities and tools. |
-| The answer is empty | Keep `LLM_TEMPLATE_FIX=on` (the default). With a model from `LLM_HF_REPO`, the fix starts with the second start of the container, after the download. |
+| The answer is empty or Home Assistant says "Unable to get response" | Keep `LLM_TEMPLATE_FIX=on` and `LLM_RETRY_EMPTY=on` (the defaults). With a model from `LLM_HF_REPO`, the fix starts with the second start of the container, after the download. |
 | The satellite stays in "listening" | Set "Finished speaking detection" to "default". Check the container log for an `STT` line. |
 | The model reads markdown aloud | The server removes most markdown before TTS. Add "no markdown, no lists" to the prompt. |
 | Wrong words in the transcript | Use a TDT model ([voice.md](voice.md#measured-stt-accuracy)). Set `STT_DEBUG_DIR` to keep the recordings and compare models. |

@@ -77,6 +77,7 @@ Set `LLM_HF_REPO` or `LLM_MODEL_FILENAME`, not both. With neither, llama-server 
 | `LLM_EXTRA_ARGS` | empty | More llama-server arguments, for example `--n-cpu-moe 8`. They come last and override the defaults, also the family defaults (sampling, thinking budget). On a GPU (`LLM_DEVICE=Vulkan0`), set `-fa off` (flash attention off). This is a strong recommendation: with flash attention on, an Intel iGPU prefilled Ling-3.0-tiny 3.7 times slower (79 against 294 tokens/s). For Granite and MiniCPM5, it made no difference. See [igpu-backends.md](igpu-backends.md). |
 | `LLM_SLOT_CACHE` | `on` | Keeps the prompt cache across restarts in `/models/llm/slots`. `off` disables it. |
 | `LLM_TEMPLATE_FIX` | `on` | For `ling3`, `lfm3` and `minicpm5`: patch the chat template from the model file so that no new thinking starts after a tool result. Ling otherwise often returns empty answers, and LFM3 and MiniCPM5 need about twice as long. `off` uses the template unchanged. See [llm.md](llm.md#the-tool-result-fix-of-the-chat-templates). |
+| `LLM_RETRY_EMPTY` | `on` | Applies when `LLM_REASONING=on`. If a chat reply has no text and no tool call, the hub repeats the request once with thinking off (`chat_template_kwargs.enable_thinking=false`). Ling sometimes writes its tool call as text into its thinking, and Home Assistant then answers "Unable to get response". `off` passes such a reply on. See [llm.md](llm.md#empty-replies-and-the-repeat). |
 | `HF_TOKEN` | empty | Token for gated Hugging Face repos |
 
 ## Web search

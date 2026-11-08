@@ -214,6 +214,8 @@ pub struct LlmConfig {
     pub extra_args: Vec<String>,
     pub slot_cache: bool,
     pub template_fix: bool,
+    /// Repeat a reply that has no text and no tool call once, with thinking off.
+    pub retry_empty: bool,
     pub internal_port: u16,
     pub hf_cache_dir: PathBuf,
     pub slot_dir: PathBuf,
@@ -240,6 +242,7 @@ impl LlmConfig {
             extra_args: vec![],
             slot_cache: true,
             template_fix: true,
+            retry_empty: true,
             internal_port: 8081,
             hf_cache_dir: PathBuf::from("/models/llm/hf"),
             slot_dir: PathBuf::from("/models/llm/slots"),
@@ -493,6 +496,7 @@ impl Config {
                 .unwrap_or_default(),
             slot_cache: on_off("LLM_SLOT_CACHE", true)?,
             template_fix: on_off("LLM_TEMPLATE_FIX", true)?,
+            retry_empty: on_off("LLM_RETRY_EMPTY", true)?,
             internal_port: 8081,
             hf_cache_dir: llm_dir.join("hf"),
             slot_dir: llm_dir.join("slots"),
@@ -678,7 +682,7 @@ mod tests {
         assert_eq!(c.max_tokens, 1024);
         assert_eq!(c.api_key, None);
         assert!(c.extra_args.is_empty());
-        assert!(c.slot_cache && c.template_fix);
+        assert!(c.slot_cache && c.template_fix && c.retry_empty);
         assert_eq!(c.internal_port, 8081);
         assert_eq!(c.hf_cache_dir, PathBuf::from("/models/llm/hf"));
         assert_eq!(c.slot_dir, PathBuf::from("/models/llm/slots"));
@@ -815,6 +819,7 @@ mod tests {
             ("LLM_EXTRA_ARGS", "-fa  off\t--n-cpu-moe 8"),
             ("LLM_SLOT_CACHE", "off"),
             ("LLM_TEMPLATE_FIX", "off"),
+            ("LLM_RETRY_EMPTY", "off"),
             ("LLM_MODEL_NAME", "my-model"),
         ])
         .unwrap()
@@ -824,7 +829,7 @@ mod tests {
         assert_eq!(c.max_tokens, 0);
         assert_eq!(c.api_key.as_deref(), Some("secret"));
         assert_eq!(c.extra_args, ["-fa", "off", "--n-cpu-moe", "8"]);
-        assert!(!c.slot_cache && !c.template_fix);
+        assert!(!c.slot_cache && !c.template_fix && !c.retry_empty);
         assert_eq!(c.model_name, "my-model");
     }
 
@@ -835,6 +840,7 @@ mod tests {
             ("LLM_MAX_TOKENS", "many"),
             ("LLM_SLOT_CACHE", "yes"),
             ("LLM_TEMPLATE_FIX", "1"),
+            ("LLM_RETRY_EMPTY", "1"),
         ] {
             let mut v = base.to_vec();
             v.push((name, value));

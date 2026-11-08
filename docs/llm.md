@@ -209,6 +209,14 @@ At each start, `assistant-hub` reads the chat template from the model file, chan
 
 Upstream status: llama.cpp b11057 added a Ling 3.0 parser for a tool call inside an unclosed thinking block (issue #27462). It does not cover a plain answer without `</think>`, which is the case that the fix covers.
 
+## Empty replies and the repeat
+
+Ling sometimes writes its tool call as text (`<tool_call>name ...`) inside its thinking. llama-server does not turn that text into a tool call, so the reply has no text and no tool call. Home Assistant then answers "Unable to get response" and keeps the question without an answer in the chat log, so the next questions of that conversation can fail the same way.
+
+With `LLM_RETRY_EMPTY=on` and thinking on, the proxy in `src/llm/proxy.rs` watches each chat reply. A streamed reply goes to the client event by event, except for the events from the first `finish_reason` on. They wait until the proxy knows that the reply has text or a tool call. If it has neither, the proxy sends the request again with `chat_template_kwargs.enable_thinking=false` and passes on the second reply. If the second reply is empty too, the client gets the first one. A reply with text or a tool call passes without a delay. Only one request is repeated, never more.
+
+The repeat costs about the time of a request with a cached prompt (prefill of the last 60 to 70 tokens, 8 generated tokens for a tool call). Without thinking, a tool call took 8 tokens instead of 33 on the Unraid server.
+
 ## Speed settings per family
 
 Measured on 2026-11-01 with 10 Home Assistant style questions: a question, a tool call, the tool result, the answer (lights, weather, sensor values, music, small talk). The history was sent the way Home Assistant sends it, without thinking. llama-server b11966, 6 threads of a Core Ultra 7 270K. The time is the mean per question after the first one, which also prefills the whole prompt.

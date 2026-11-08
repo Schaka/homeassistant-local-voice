@@ -57,6 +57,7 @@ struct Inner {
     streams_started: AtomicUsize,
     streams_cut: AtomicUsize,
     chat_script: Mutex<Vec<String>>,
+    stream_script: Mutex<Vec<String>>,
     chat_calls: AtomicUsize,
     sidecars: std::sync::atomic::AtomicBool,
 }
@@ -77,6 +78,7 @@ impl Default for Fake {
             streams_started: AtomicUsize::new(0),
             streams_cut: AtomicUsize::new(0),
             chat_script: Mutex::default(),
+            stream_script: Mutex::default(),
             chat_calls: AtomicUsize::new(0),
             sidecars: std::sync::atomic::AtomicBool::new(false),
         }))
@@ -106,6 +108,13 @@ impl Fake {
     /// repeats. Without a script the recording answers.
     pub fn set_chat_script(&self, replies: Vec<String>) {
         *self.0.chat_script.lock().unwrap() = replies;
+        self.0.chat_calls.store(0, Ordering::SeqCst);
+    }
+
+    /// The server-sent event bodies of streamed chat requests, in order. The
+    /// last one repeats. Without a script the recording answers.
+    pub fn set_stream_script(&self, bodies: Vec<String>) {
+        *self.0.stream_script.lock().unwrap() = bodies;
         self.0.chat_calls.store(0, Ordering::SeqCst);
     }
 
@@ -244,7 +253,14 @@ impl Fake {
             return json(200, &script[i.min(script.len() - 1)]);
         }
         // The `data:` lines of the recording, one event each.
-        let events: Vec<String> = LLAMACPP_STREAM
+        let script = self.0.stream_script.lock().unwrap().clone();
+        let recording = if script.is_empty() {
+            LLAMACPP_STREAM.to_owned()
+        } else {
+            let i = self.0.chat_calls.fetch_add(1, Ordering::SeqCst);
+            script[i.min(script.len() - 1)].clone()
+        };
+        let events: Vec<String> = recording
             .lines()
             .filter(|l| l.starts_with("data: "))
             .map(|l| format!("{l}\n\n"))

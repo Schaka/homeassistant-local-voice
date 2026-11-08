@@ -379,10 +379,10 @@ async fn run(cfg: Config) -> Result<bool> {
                 tokio::spawn(cache.clone().run(shutdown.clone()));
                 slot_cache = Some(cache);
             }
-            Some(llm::proxy::LlmProxy::new(
-                llm_cfg.internal_port,
-                llm_cfg.api_key.clone(),
-            )?)
+            Some(
+                llm::proxy::LlmProxy::new(llm_cfg.internal_port, llm_cfg.api_key.clone())?
+                    .with_retry_empty(llm_cfg.reasoning && llm_cfg.retry_empty),
+            )
         }
         None => None,
     };

@@ -2,6 +2,14 @@
 //!
 //! Request and response bodies stream through, so server-sent events from
 //! `/llm/v1/chat/completions` reach the client token by token.
+//!
+//! One exception, for chat requests (`retry_empty`): Ling sometimes writes its
+//! tool call as text into its thinking text. llama-server then returns a reply
+//! with no text and no tool call, and Home Assistant answers "Unable to get
+//! response". The proxy detects such a reply and repeats the request once with
+//! `chat_template_kwargs.enable_thinking=false`, where the model calls the tool
+//! directly. A good reply passes through token by token. Only the events from
+//! the `finish_reason` on wait until the proxy knows that the reply is not empty.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -10,8 +18,13 @@ use std::time::Duration;
 use axum::body::Body;
 use axum::http::{HeaderMap, HeaderName, Method, Request, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
+use bytes::Bytes;
 use futures_util::StreamExt;
-use serde_json::json;
+use serde_json::{Value, json};
+use tokio::sync::mpsc;
+
+/// The largest chat request that the proxy buffers for a possible repeat.
+const MAX_CHAT_BODY: usize = 16 * 1024 * 1024;
 
 const HOP_HEADERS: &[&str] = &[
     "connection",
@@ -32,6 +45,8 @@ pub struct LlmProxy {
     api_key: Option<String>,
     /// Requests that are forwarded and not yet answered to the end.
     in_flight: Arc<AtomicUsize>,
+    /// Repeat an empty chat reply once with thinking off.
+    retry_empty: bool,
 }
 
 /// The state of llama-server, from its own `/health`.
@@ -101,7 +116,14 @@ impl LlmProxy {
             backend: format!("http://127.0.0.1:{port}"),
             api_key,
             in_flight: Arc::default(),
+            retry_empty: false,
         })
+    }
+
+    /// Turns the repeat of empty chat replies on or off.
+    pub fn with_retry_empty(mut self, on: bool) -> Self {
+        self.retry_empty = on;
+        self
     }
 
     /// Probes llama-server's own `/health`. A 2xx answer means the model is
@@ -137,46 +159,350 @@ impl LlmProxy {
             return error(StatusCode::UNAUTHORIZED, "Invalid API Key", "authentication_error");
         }
         let in_flight = InFlight::new(&self.in_flight);
-        let url = format!("{}{}", self.backend, backend_path(&parts.uri));
+        let path = backend_path(&parts.uri);
+        let url = format!("{}{}", self.backend, path);
+        if self.retry_empty && parts.method == Method::POST && is_chat_path(&path) {
+            return self.forward_chat(&parts.headers, url, body, in_flight).await;
+        }
         let method = reqwest::Method::from_bytes(parts.method.as_str().as_bytes()).unwrap_or(reqwest::Method::GET);
-        let mut out = self.client.request(method, &url);
-        for (name, value) in &parts.headers {
+        let mut out = self.outgoing(method, &url, &parts.headers);
+        if parts.method != Method::GET && parts.method != Method::HEAD {
+            out = out.body(reqwest::Body::wrap_stream(body.into_data_stream()));
+        }
+        match out.send().await {
+            Ok(resp) => relay(resp, in_flight),
+            Err(err) => send_error(&err),
+        }
+    }
+
+    /// A request to llama-server with the headers of the client.
+    fn outgoing(&self, method: reqwest::Method, url: &str, headers: &HeaderMap) -> reqwest::RequestBuilder {
+        let mut out = self.client.request(method, url);
+        for (name, value) in headers {
             if keep_header(name) && name != header::AUTHORIZATION {
                 out = out.header(name.as_str(), value.as_bytes());
             }
         }
-        if parts.method != Method::GET && parts.method != Method::HEAD {
-            out = out.body(reqwest::Body::wrap_stream(body.into_data_stream()));
-        }
-        let resp = match out.send().await {
+        out
+    }
+
+    /// A chat request. A reply that has no text and no tool call is repeated
+    /// once with thinking off, see the module comment.
+    async fn forward_chat(&self, headers: &HeaderMap, url: String, body: Body, in_flight: InFlight) -> Response {
+        let Ok(bytes) = axum::body::to_bytes(body, MAX_CHAT_BODY).await else {
+            return error(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "request body is too large",
+                "invalid_request_error",
+            );
+        };
+        let retry_body = without_thinking(&bytes);
+        let resp = match self
+            .outgoing(reqwest::Method::POST, &url, headers)
+            .body(bytes)
+            .send()
+            .await
+        {
             Ok(resp) => resp,
-            Err(err) if err.is_connect() => {
-                return error(
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "llama-server is not ready yet",
-                    "unavailable",
-                );
+            Err(err) => return send_error(&err),
+        };
+        let Some(retry_body) = retry_body.filter(|_| resp.status().is_success()) else {
+            return relay(resp, in_flight);
+        };
+        let retry = Retry {
+            proxy: self.clone(),
+            url,
+            headers: headers.clone(),
+            body: retry_body,
+        };
+        if is_event_stream(&resp) {
+            retry.stream(resp, in_flight)
+        } else {
+            retry.json(resp, in_flight).await
+        }
+    }
+}
+
+/// The data to repeat one chat request without thinking.
+struct Retry {
+    proxy: LlmProxy,
+    url: String,
+    headers: HeaderMap,
+    body: Bytes,
+}
+
+impl Retry {
+    /// Sends the repeated request. `None` if llama-server does not accept it.
+    async fn send(&self) -> Option<reqwest::Response> {
+        let resp = self
+            .proxy
+            .outgoing(reqwest::Method::POST, &self.url, &self.headers)
+            .body(self.body.clone())
+            .send()
+            .await;
+        match resp {
+            Ok(resp) if resp.status().is_success() => Some(resp),
+            Ok(resp) => {
+                tracing::warn!("LLM proxy: the repeated request got status {}", resp.status());
+                None
             }
             Err(err) => {
-                tracing::warn!("LLM proxy: {err}");
-                return error(StatusCode::BAD_GATEWAY, &err.to_string(), "upstream_error");
-            }
-        };
-        let mut builder = Response::builder().status(resp.status().as_u16());
-        for (name, value) in resp.headers() {
-            if !HOP_HEADERS.contains(&name.as_str()) {
-                builder = builder.header(name.as_str(), value.as_bytes());
+                tracing::warn!("LLM proxy: the repeated request failed: {err}");
+                None
             }
         }
-        // The count ends with the body stream, after the last token.
-        let body = resp.bytes_stream().map(move |chunk| {
-            let _counted = &in_flight;
-            chunk
-        });
-        builder
-            .body(Body::from_stream(body))
-            .unwrap_or_else(|err| error(StatusCode::BAD_GATEWAY, &err.to_string(), "upstream_error"))
     }
+
+    /// Streams the events to the client. The events from the first one with a
+    /// `finish_reason` on wait until the end, because a client stops at that
+    /// event.
+    fn stream(self, resp: reqwest::Response, in_flight: InFlight) -> Response {
+        let (status, headers) = (resp.status(), resp.headers().clone());
+        let (tx, rx) = mpsc::channel(32);
+        tokio::spawn(async move {
+            let _counted = in_flight;
+            self.run_stream(resp, tx).await;
+        });
+        let body = futures_util::stream::unfold(rx, |mut rx| async move { rx.recv().await.map(|item| (item, rx)) });
+        response_from(status, &headers, Body::from_stream(body))
+    }
+
+    async fn run_stream(&self, resp: reqwest::Response, tx: Sender) {
+        let first = pump(resp, &tx).await;
+        if first.end != End::Done {
+            return;
+        }
+        if first.finished && !first.output {
+            tracing::warn!("LLM reply has no text and no tool call, repeating the request without thinking");
+            if let Some(resp) = self.send().await.filter(is_event_stream) {
+                let second = pump(resp, &tx).await;
+                if second.end != End::Done {
+                    return;
+                }
+                if second.output {
+                    release(second.held, &tx).await;
+                    return;
+                }
+                tracing::warn!("the repeated LLM reply is empty too");
+            }
+        }
+        release(first.held, &tx).await;
+    }
+
+    /// A reply that is not streamed.
+    async fn json(self, resp: reqwest::Response, in_flight: InFlight) -> Response {
+        let _counted = in_flight;
+        let (status, headers) = (resp.status(), resp.headers().clone());
+        let body = match resp.bytes().await {
+            Ok(body) => body,
+            Err(err) => return send_error(&err),
+        };
+        if reply_is_empty(&body) {
+            tracing::warn!("LLM reply has no text and no tool call, repeating the request without thinking");
+            if let Some(resp) = self.send().await {
+                let (status, headers) = (resp.status(), resp.headers().clone());
+                if let Ok(second) = resp.bytes().await {
+                    if !reply_is_empty(&second) {
+                        return response_from(status, &headers, Body::from(second));
+                    }
+                    tracing::warn!("the repeated LLM reply is empty too");
+                }
+            }
+        }
+        response_from(status, &headers, Body::from(body))
+    }
+}
+
+type Sender = mpsc::Sender<Result<Bytes, std::io::Error>>;
+
+/// What `pump` did with one response.
+#[derive(Debug, Default, PartialEq, Eq)]
+enum End {
+    /// The upstream stream ended.
+    #[default]
+    Done,
+    /// The client closed its connection.
+    ClientGone,
+    /// The upstream stream broke. The client got the error.
+    UpstreamError,
+}
+
+#[derive(Default)]
+struct Pumped {
+    /// Some event had text or a tool call.
+    output: bool,
+    /// Some event had a `finish_reason`.
+    finished: bool,
+    /// The events from the one with the `finish_reason` on.
+    held: Vec<Bytes>,
+    end: End,
+}
+
+impl Pumped {
+    /// Sends one event to the client, or holds it. `false` if the client left.
+    async fn handle(&mut self, event: Vec<u8>, tx: &Sender) -> bool {
+        let info = classify(&event);
+        self.output |= info.text || info.tool_call;
+        self.finished |= info.finish;
+        let event = Bytes::from(event);
+        if self.finished {
+            self.held.push(event);
+            true
+        } else {
+            tx.send(Ok(event)).await.is_ok()
+        }
+    }
+}
+
+/// Reads the events of one streamed response and sends them on, except for
+/// the held ones.
+async fn pump(resp: reqwest::Response, tx: &Sender) -> Pumped {
+    let mut out = Pumped::default();
+    let mut upstream = resp.bytes_stream();
+    let mut buf: Vec<u8> = Vec::new();
+    loop {
+        let item = tokio::select! {
+            () = tx.closed() => {
+                out.end = End::ClientGone;
+                return out;
+            }
+            item = upstream.next() => item,
+        };
+        match item {
+            Some(Ok(chunk)) => {
+                buf.extend_from_slice(&chunk);
+                while let Some(pos) = buf.windows(2).position(|w| w == b"\n\n") {
+                    let event: Vec<u8> = buf.drain(..pos + 2).collect();
+                    if !out.handle(event, tx).await {
+                        out.end = End::ClientGone;
+                        return out;
+                    }
+                }
+            }
+            Some(Err(err)) => {
+                let _ = tx.send(Err(std::io::Error::other(err))).await;
+                out.end = End::UpstreamError;
+                return out;
+            }
+            None => break,
+        }
+    }
+    if !buf.is_empty() && !out.handle(buf, tx).await {
+        out.end = End::ClientGone;
+    }
+    out
+}
+
+async fn release(held: Vec<Bytes>, tx: &Sender) {
+    for event in held {
+        if tx.send(Ok(event)).await.is_err() {
+            return;
+        }
+    }
+}
+
+/// What one server-sent event carries.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct EventInfo {
+    /// Text for the user. Thinking is not text.
+    text: bool,
+    tool_call: bool,
+    finish: bool,
+}
+
+fn classify(event: &[u8]) -> EventInfo {
+    let mut info = EventInfo::default();
+    for line in event.split(|b| *b == b'\n') {
+        let Some(data) = line.strip_prefix(b"data:") else {
+            continue;
+        };
+        let Ok(v) = serde_json::from_slice::<Value>(data.trim_ascii()) else {
+            continue;
+        };
+        let Some(choice) = v["choices"].get(0) else {
+            continue;
+        };
+        let delta = &choice["delta"];
+        info.text |= delta["content"].as_str().is_some_and(|s| !s.trim().is_empty());
+        info.tool_call |= delta["tool_calls"].as_array().is_some_and(|a| !a.is_empty());
+        info.finish |= !choice["finish_reason"].is_null();
+    }
+    info
+}
+
+/// `true` for a complete chat reply (not streamed) without text and tool call.
+fn reply_is_empty(body: &[u8]) -> bool {
+    let Ok(v) = serde_json::from_slice::<Value>(body) else {
+        return false;
+    };
+    let Some(choice) = v["choices"].get(0) else {
+        return false;
+    };
+    let message = &choice["message"];
+    message["content"].as_str().is_none_or(|s| s.trim().is_empty())
+        && message["tool_calls"].as_array().is_none_or(Vec::is_empty)
+}
+
+/// The request body with `chat_template_kwargs.enable_thinking` off. `None`
+/// if the body is no JSON object, or thinking is off already.
+fn without_thinking(body: &[u8]) -> Option<Bytes> {
+    let mut v: Value = serde_json::from_slice(body).ok()?;
+    let kwargs = v
+        .as_object_mut()?
+        .entry("chat_template_kwargs")
+        .or_insert_with(|| json!({}))
+        .as_object_mut()?;
+    if kwargs.get("enable_thinking") == Some(&Value::Bool(false)) {
+        return None;
+    }
+    kwargs.insert("enable_thinking".into(), Value::Bool(false));
+    serde_json::to_vec(&v).ok().map(Bytes::from)
+}
+
+fn is_chat_path(path: &str) -> bool {
+    path.split('?').next() == Some("/v1/chat/completions")
+}
+
+fn is_event_stream(resp: &reqwest::Response) -> bool {
+    resp.headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.starts_with("text/event-stream"))
+}
+
+fn send_error(err: &reqwest::Error) -> Response {
+    if err.is_connect() {
+        return error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "llama-server is not ready yet",
+            "unavailable",
+        );
+    }
+    tracing::warn!("LLM proxy: {err}");
+    error(StatusCode::BAD_GATEWAY, &err.to_string(), "upstream_error")
+}
+
+fn response_from(status: reqwest::StatusCode, headers: &reqwest::header::HeaderMap, body: Body) -> Response {
+    let mut builder = Response::builder().status(status.as_u16());
+    for (name, value) in headers {
+        if !HOP_HEADERS.contains(&name.as_str()) {
+            builder = builder.header(name.as_str(), value.as_bytes());
+        }
+    }
+    builder
+        .body(body)
+        .unwrap_or_else(|err| error(StatusCode::BAD_GATEWAY, &err.to_string(), "upstream_error"))
+}
+
+/// Passes the response through as it comes.
+fn relay(resp: reqwest::Response, in_flight: InFlight) -> Response {
+    let (status, headers) = (resp.status(), resp.headers().clone());
+    // The count ends with the body stream, after the last token.
+    let body = resp.bytes_stream().map(move |chunk| {
+        let _counted = &in_flight;
+        chunk
+    });
+    response_from(status, &headers, Body::from_stream(body))
 }
 
 #[cfg(test)]
@@ -414,5 +740,105 @@ mod tests {
         let _ = body_text(resp).await;
         assert_eq!(proxy.in_flight.load(Ordering::SeqCst), 0);
         assert_eq!(proxy.health().await, LlmHealth::Unavailable);
+    }
+
+    /// One streamed reply as the `data:` lines of llama-server.
+    fn sse(deltas: &[&str], finish: &str) -> String {
+        let mut out = String::new();
+        for d in deltas {
+            out.push_str(&format!(
+                "data: {{\"choices\":[{{\"finish_reason\":null,\"index\":0,\"delta\":{d}}}]}}\n\n"
+            ));
+        }
+        out.push_str(&format!(
+            "data: {{\"choices\":[{{\"finish_reason\":\"{finish}\",\"index\":0,\"delta\":{{}}}}]}}\n\ndata: [DONE]\n\n"
+        ));
+        out
+    }
+
+    const THINKING_ONLY: &[&str] = &[
+        r#"{"role":"assistant","content":null}"#,
+        r#"{"reasoning_content":"<tool_call>x"}"#,
+    ];
+    const TOOL_CALL: &[&str] = &[
+        r#"{"role":"assistant","content":null}"#,
+        r#"{"tool_calls":[{"index":0,"id":"a","type":"function","function":{"name":"T","arguments":"{}"}}]}"#,
+    ];
+
+    async fn stream_text(proxy: &LlmProxy) -> String {
+        let resp = proxy.forward(chat(true)).await;
+        assert_eq!(resp.status(), 200);
+        body_text(resp).await
+    }
+
+    #[tokio::test]
+    async fn an_empty_streamed_reply_is_repeated_without_thinking() {
+        let fake = Fake::default();
+        fake.set_stream_script(vec![sse(THINKING_ONLY, "stop"), sse(TOOL_CALL, "tool_calls")]);
+        let proxy = proxy_to_fake(&fake, None).await.with_retry_empty(true);
+        let text = stream_text(&proxy).await;
+        assert!(text.contains("\"tool_calls\""), "{text}");
+        assert!(text.trim_end().ends_with("data: [DONE]"));
+        assert_eq!(text.matches("[DONE]").count(), 1, "{text}");
+        let seen = fake.seen_with("/v1/chat/completions");
+        assert_eq!(seen.len(), 2);
+        assert!(String::from_utf8_lossy(&seen[1].body).contains(r#""enable_thinking":false"#));
+        assert!(!String::from_utf8_lossy(&seen[0].body).contains("enable_thinking"));
+    }
+
+    #[tokio::test]
+    async fn a_good_streamed_reply_is_sent_once() {
+        let fake = Fake::default();
+        fake.set_stream_script(vec![sse(TOOL_CALL, "tool_calls")]);
+        let proxy = proxy_to_fake(&fake, None).await.with_retry_empty(true);
+        let text = stream_text(&proxy).await;
+        assert!(text.contains("\"tool_calls\""));
+        assert_eq!(fake.seen_with("/v1/chat/completions").len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_second_empty_reply_ends_the_stream_properly() {
+        let fake = Fake::default();
+        fake.set_stream_script(vec![sse(THINKING_ONLY, "stop")]);
+        let proxy = proxy_to_fake(&fake, None).await.with_retry_empty(true);
+        let text = stream_text(&proxy).await;
+        assert!(text.contains("\"finish_reason\":\"stop\""));
+        assert_eq!(text.matches("[DONE]").count(), 1, "{text}");
+        assert_eq!(fake.seen_with("/v1/chat/completions").len(), 2);
+    }
+
+    #[tokio::test]
+    async fn an_empty_reply_passes_when_the_repeat_is_off() {
+        let fake = Fake::default();
+        fake.set_stream_script(vec![sse(THINKING_ONLY, "stop")]);
+        let proxy = proxy_to_fake(&fake, None).await;
+        stream_text(&proxy).await;
+        assert_eq!(fake.seen_with("/v1/chat/completions").len(), 1);
+    }
+
+    #[tokio::test]
+    async fn an_empty_json_reply_is_repeated_without_thinking() {
+        let empty = r#"{"choices":[{"finish_reason":"stop","index":0,"message":{"role":"assistant","content":"","reasoning_content":"x"}}]}"#;
+        let fake = Fake::default();
+        fake.set_chat_script(vec![empty.to_owned(), crate::llm::fake::LLAMACPP_CHAT.to_owned()]);
+        let proxy = proxy_to_fake(&fake, None).await.with_retry_empty(true);
+        let resp = proxy.forward(chat(false)).await;
+        let v: serde_json::Value = serde_json::from_str(&body_text(resp).await).unwrap();
+        assert_eq!(v["choices"][0]["finish_reason"], "tool_calls");
+        assert_eq!(fake.seen_with("/v1/chat/completions").len(), 2);
+    }
+
+    #[test]
+    fn helpers() {
+        assert!(reply_is_empty(
+            br#"{"choices":[{"message":{"content":" ","tool_calls":[]}}]}"#
+        ));
+        assert!(!reply_is_empty(br#"{"choices":[{"message":{"content":"hi"}}]}"#));
+        assert!(!reply_is_empty(b"not json"));
+        let b = without_thinking(br#"{"a":1}"#).unwrap();
+        assert!(String::from_utf8_lossy(&b).contains(r#""enable_thinking":false"#));
+        assert!(without_thinking(br#"{"chat_template_kwargs":{"enable_thinking":false}}"#).is_none());
+        assert!(is_chat_path("/v1/chat/completions"));
+        assert!(!is_chat_path("/v1/models"));
     }
 }
