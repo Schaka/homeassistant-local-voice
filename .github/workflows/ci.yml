@@ -30,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+      - uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
         with:
           cache: false
       - run: cargo fmt --all --check
@@ -47,7 +47,7 @@ jobs:
       # folder of an older Python.
       - run: echo "PYO3_PYTHON=$pythonLocation/bin/python3.13" >> "$GITHUB_ENV"
       # Reads rust-toolchain.toml, denies warnings and caches ~/.cargo and target/.
-      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+      - uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
       # build.rs generates the llama.cpp bindings with bindgen (libclang) from
       # the headers of LLAMACPP_BUILD, as in the image.
       - run: sudo apt-get update -q && sudo apt-get install -y -q libclang-dev
@@ -73,7 +73,7 @@ jobs:
       # when PYO3_PYTHON changes, so the cached target/ never links against the
       # folder of an older Python.
       - run: echo "PYO3_PYTHON=$pythonLocation/bin/python3.13" >> "$GITHUB_ENV"
-      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+      - uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
       - run: sudo apt-get update -q && sudo apt-get install -y -q libclang-dev libgomp1 cmake
       - run: ./scripts/fetch-llama-headers.sh
       # ik_llama.cpp builds from source in about five minutes. The cache key
