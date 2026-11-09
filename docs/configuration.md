@@ -128,10 +128,10 @@ The Dockerfile bakes models and pins versions with these arguments. `docker-bake
 | `LLM_MODEL_URL` | empty | LLM file to bake into the image. Empty bakes none. |
 | `LLM_MODEL_FILENAME` | empty | File name of the baked LLM |
 | `LLM_FAMILY` | empty | Default of the variable `LLM_FAMILY` |
-| `LLAMACPP_BUILD` | `b12032` | llama.cpp release that the image contains |
-| `IKLLAMA_COMMIT` | `35e0be560a755221b8789f667b8aab134a36bc0c` | ik_llama.cpp commit that the image builds |
-| `SEARXNG_COMMIT` | `10db664f14bc34565d4fd6ca6d846b6f932976aa` | SearXNG commit that the image contains |
-| `AUDIOCPP_COMMIT` | `bee4f364b687c34d918048243731d34b091ee7a7` | audio.cpp commit that the image builds |
+| `LLAMACPP_BUILD` | `b12211` | llama.cpp release that the image contains |
+| `IKLLAMA_COMMIT` | `39fc3128ccc428314a64b98de09af24bd7bb4990` | ik_llama.cpp commit that the image builds |
+| `SEARXNG_COMMIT` | `3a3dd15bfafcb645a1b45c2c6c0798a8f786aaaf` | SearXNG commit that the image contains |
+| `AUDIOCPP_COMMIT` | `28aaff1c0b110367b0f73955089b33390e639ee2` | audio.cpp commit that the image builds |
 | `PARAKEET_VERSION` | `v0.6.1` | parakeet.cpp release that the image contains |
 | `HUSH_COMMIT` | `9f6414e91461a8f4bdf9840c0cdcdcb7da986339` | Hush commit that the image builds `libweya_nc.so` from |
 | `HUSH_MODEL_REVISION` | `a55d932cbf6344d284ac985f21e7f6e5bc4d38a5` | Revision of `weya-ai/hush` on Hugging Face for the model bundle |
