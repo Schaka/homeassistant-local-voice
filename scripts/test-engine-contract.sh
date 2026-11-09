@@ -15,13 +15,22 @@ pin() { sed -n "s/^variable \"$1\" { default = \"\\(.*\\)\" }/\\1/p" docker-bake
 dir="target/engine-contract"
 mkdir -p "$dir"
 
+# GitHub and Hugging Face answer 504 for short periods. Five tries, 15 seconds
+# apart, wait out such a period. curl prints only the status, so the message
+# names the URL. A failed download leaves no file, because the model check
+# below takes any file as already downloaded.
+download() {
+    curl -fsSL --retry 5 --retry-delay 15 -o "$2" "$1" \
+        || { rm -f "$2"; echo "download failed: $1" >&2; exit 1; }
+}
+
 case $engine in
 llamacpp)
     build=$(pin LLAMACPP_BUILD)
     bin="$PWD/$dir/llama-$build/llama-server"
     if [ ! -x "$bin" ]; then
-        curl -fsSL --retry 3 -o "$dir/llama.tar.gz" \
-            "https://github.com/ggml-org/llama.cpp/releases/download/$build/llama-$build-bin-ubuntu-x64.tar.gz"
+        download "https://github.com/ggml-org/llama.cpp/releases/download/$build/llama-$build-bin-ubuntu-x64.tar.gz" \
+            "$dir/llama.tar.gz"
         tar xzf "$dir/llama.tar.gz" -C "$dir"
         rm "$dir/llama.tar.gz"
     fi
@@ -40,8 +49,7 @@ esac
 model="$dir/stories260K.gguf"
 want=270cba1bd5109f42d03350f60406024560464db173c0e387d91f0426d3bd256d
 if [ ! -f "$model" ]; then
-    curl -fsSL --retry 3 -o "$model" \
-        https://huggingface.co/ggml-org/models/resolve/main/tinyllamas/stories260K.gguf
+    download https://huggingface.co/ggml-org/models/resolve/main/tinyllamas/stories260K.gguf "$model"
 fi
 echo "$want  $model" | sha256sum --check --status || { echo "unexpected hash of $model" >&2; exit 1; }
 

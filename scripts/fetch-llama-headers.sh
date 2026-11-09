@@ -12,6 +12,13 @@ if [ -f "$dir/include/llama.h" ]; then
     exit 0
 fi
 mkdir -p "$dir"
-curl -fsSL "https://github.com/ggml-org/llama.cpp/archive/refs/tags/$build.tar.gz" \
-    | tar xz -C "$dir" --strip-components=1 --wildcards "llama.cpp-$build/include/*.h" "llama.cpp-$build/ggml/include/*.h"
+# GitHub answers 504 for short periods. Five tries, 15 seconds apart, wait out
+# such a period. curl writes to a file and not into a pipe, so a retry after a
+# broken transfer starts the archive anew instead of feeding tar a second copy.
+url="https://github.com/ggml-org/llama.cpp/archive/refs/tags/$build.tar.gz"
+archive="$dir.tar.gz"
+curl -fsSL --retry 5 --retry-delay 15 -o "$archive" "$url" \
+    || { rm -f "$archive"; echo "download failed: $url" >&2; exit 1; }
+tar xzf "$archive" -C "$dir" --strip-components=1 --wildcards "llama.cpp-$build/include/*.h" "llama.cpp-$build/ggml/include/*.h"
+rm "$archive"
 echo "$dir"

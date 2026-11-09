@@ -76,6 +76,19 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
       - run: sudo apt-get update -q && sudo apt-get install -y -q libclang-dev libgomp1 cmake
       - run: ./scripts/fetch-llama-headers.sh
+      # GitHub and Hugging Face answer 504 for short periods. The job keeps the
+      # downloads of test-engine-contract.sh, so most runs send no request. A
+      # cache saved on main reaches every branch and pull request. The test
+      # model changes only with the script, the llama.cpp release with its pin.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: target/engine-contract/stories260K.gguf
+          key: engine-contract-model-${{ hashFiles('scripts/test-engine-contract.sh') }}
+      - if: matrix.engine == 'llamacpp'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: target/engine-contract/llama-*
+          key: llamacpp-${{ hashFiles('docker-bake.hcl') }}
       # ik_llama.cpp builds from source in about five minutes. The cache key
       # holds the commit and the build script.
       - if: matrix.engine == 'ik'
