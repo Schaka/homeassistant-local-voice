@@ -501,7 +501,12 @@ impl MediaIndex {
             .lock()
             .ok()
             .and_then(|t| *t)
-            .map(|t| chrono::DateTime::<chrono::Local>::from(t).to_rfc3339());
+            .and_then(|t| jiff::Timestamp::try_from(t).ok())
+            .map(|t| {
+                t.to_zoned(jiff::tz::TimeZone::system())
+                    .strftime("%Y-%m-%dT%H:%M:%S%:z")
+                    .to_string()
+            });
         json!({
             "status": self.state(),
             "series": series, "movies": movies, "episodes": episodes,

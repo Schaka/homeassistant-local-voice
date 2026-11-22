@@ -61,7 +61,7 @@ impl Tools {
                 let query = search::with_year(query, search::current_year());
                 match backend.search(query.clone(), count).await {
                     Ok(results) => {
-                        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+                        let today = jiff::Zoned::now().strftime("%Y-%m-%d").to_string();
                         let text = search::format_results(&results, count, &today);
                         tracing::info!("search {query:?} -> {} chars", text.len());
                         json!({"content": [{"type": "text", "text": text}]})

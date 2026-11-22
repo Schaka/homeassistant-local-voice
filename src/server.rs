@@ -182,7 +182,7 @@ async fn web_search(State(app): State<Shared>, Query(q): Query<HashMap<String, S
     let query = search::with_year(query, search::current_year());
     match backend.search(query.clone(), count).await {
         Ok(results) => {
-            let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+            let today = jiff::Zoned::now().strftime("%Y-%m-%d").to_string();
             axum::Json(json!({
                 "query": query,
                 "text": search::format_results(&results, count, &today),

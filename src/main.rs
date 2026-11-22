@@ -132,6 +132,15 @@ enum Probe {
     },
 }
 
+/// Log timestamps in local time, as RFC 3339 with microseconds.
+struct LocalTime;
+
+impl tracing_subscriber::fmt::time::FormatTime for LocalTime {
+    fn format_time(&self, w: &mut tracing_subscriber::fmt::format::Writer<'_>) -> std::fmt::Result {
+        write!(w, "{}", jiff::Zoned::now().strftime("%Y-%m-%dT%H:%M:%S%.6f%:z"))
+    }
+}
+
 fn init_logging() {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -139,7 +148,7 @@ fn init_logging() {
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .with_target(false)
-        .with_timer(tracing_subscriber::fmt::time::ChronoLocal::rfc_3339())
+        .with_timer(LocalTime)
         .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stdout()))
         .init();
 }
@@ -495,4 +504,20 @@ async fn run(cfg: Config) -> Result<bool> {
     }
     let _ = tokio::time::timeout(Duration::from_secs(2), server).await;
     Ok(gpu_lost.is_cancelled())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn time_formats() {
+        let now = jiff::Zoned::now();
+        let log = now.strftime("%Y-%m-%dT%H:%M:%S%.6f%:z").to_string();
+        // 2026-11-22T12:00:00.123456+01:00
+        assert_eq!(log.len(), 32, "{log}");
+        assert_eq!(&log[19..20], ".", "{log}");
+        let stem = now.strftime("%Y%m%d-%H%M%S-%3f").to_string();
+        // 20261122-120000-123
+        assert_eq!(stem.len(), 19, "{stem}");
+        assert_eq!(now.strftime("%Y-%m-%d").to_string().len(), 10);
+    }
 }

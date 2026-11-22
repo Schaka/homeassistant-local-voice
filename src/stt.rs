@@ -142,7 +142,7 @@ pub fn save_debug_recording(dir: &Path, pcm: &[i16], cleaned: Option<&[i16]>, te
 
 fn save_debug_inner(dir: &Path, pcm: &[i16], cleaned: Option<&[i16]>, text: &str) -> Result<()> {
     std::fs::create_dir_all(dir)?;
-    let stem = chrono::Local::now().format("%Y%m%d-%H%M%S-%3f").to_string();
+    let stem = jiff::Zoned::now().strftime("%Y%m%d-%H%M%S-%3f").to_string();
     std::fs::write(dir.join(format!("{stem}.wav")), crate::audio::wav_bytes(pcm, RATE, 1))?;
     if let Some(clean) = cleaned {
         std::fs::write(

@@ -9,7 +9,6 @@ use std::path::Path;
 use std::sync::LazyLock;
 
 use anyhow::{Context, Result};
-use chrono::Datelike;
 use futures_util::future::BoxFuture;
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
@@ -201,7 +200,7 @@ pub fn with_year(query: &str, year: i32) -> String {
 }
 
 pub fn current_year() -> i32 {
-    chrono::Local::now().year()
+    i32::from(jiff::Zoned::now().year())
 }
 
 fn trim(text: &str, limit: usize) -> String {
