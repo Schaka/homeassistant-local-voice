@@ -137,7 +137,7 @@ struct LocalTime;
 
 impl tracing_subscriber::fmt::time::FormatTime for LocalTime {
     fn format_time(&self, w: &mut tracing_subscriber::fmt::format::Writer<'_>) -> std::fmt::Result {
-        write!(w, "{}", jiff::Zoned::now().strftime("%Y-%m-%dT%H:%M:%S%.6f%:z"))
+        write!(w, "{}", jiff::ZonedDateTime::now().strftime("%Y-%m-%dT%H:%M:%S%.6f%:z"))
     }
 }
 
@@ -510,7 +510,7 @@ async fn run(cfg: Config) -> Result<bool> {
 mod tests {
     #[test]
     fn time_formats() {
-        let now = jiff::Zoned::now();
+        let now = jiff::ZonedDateTime::now();
         let log = now.strftime("%Y-%m-%dT%H:%M:%S%.6f%:z").to_string();
         // 2026-11-22T12:00:00.123456+01:00
         assert_eq!(log.len(), 32, "{log}");
