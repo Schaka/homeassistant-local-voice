@@ -200,7 +200,7 @@ pub fn with_year(query: &str, year: i32) -> String {
 }
 
 pub fn current_year() -> i32 {
-    i32::from(jiff::Zoned::now().year())
+    i32::from(jiff::ZonedDateTime::now().year())
 }
 
 fn trim(text: &str, limit: usize) -> String {

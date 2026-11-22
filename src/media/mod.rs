@@ -503,7 +503,7 @@ impl MediaIndex {
             .and_then(|t| *t)
             .and_then(|t| jiff::Timestamp::try_from(t).ok())
             .map(|t| {
-                t.to_zoned(jiff::tz::TimeZone::system())
+                t.to_zoned_datetime(jiff::tz::TimeZone::system())
                     .strftime("%Y-%m-%dT%H:%M:%S%:z")
                     .to_string()
             });
