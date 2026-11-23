@@ -71,14 +71,14 @@ variable "STT_MODEL_NAME" { default = "parakeet-ctc-0.6b" }
 # Optional conversation agent. llama.cpp is a pinned prebuilt Vulkan release.
 # No LLM model is baked by default. Mount one under /models/llm or set
 # LLM_HF_REPO (docs/llm.md).
-variable "LLAMACPP_BUILD" { default = "b12428" }
+variable "LLAMACPP_BUILD" { default = "b12649" }
 # ik_llama.cpp runs the LLM on the CPU, built from this commit (AVX2, no AVX-512).
-variable "IKLLAMA_COMMIT" { default = "900e08c01cd8adcfeaebf9fd89f646c48837a14b" }
+variable "IKLLAMA_COMMIT" { default = "1180df7edc2349470b651b64cade01341b52e0af" }
 # Pinned sources. The workflow "Bump pins" opens a pull request for each newer
 # upstream version (scripts/bump-pins.sh). Test the image before you merge it.
-variable "AUDIOCPP_COMMIT" { default = "fc3852a26b96f2b221cb78d67095bd96aac98e0c" }
+variable "AUDIOCPP_COMMIT" { default = "9999a82e267ebf7088971ac277af77b3dd654a84" }
 variable "PARAKEET_VERSION" { default = "v0.6.1" }
-variable "SEARXNG_COMMIT" { default = "2d500cb6b8e98b5f57fb446786e91f8de03be89f" }
+variable "SEARXNG_COMMIT" { default = "a7163d091037cae586c444b05f22ecca162bb492" }
 # Hush (STT_DENOISE=hush): the libweya_nc source commit and the model bundle.
 # A new model revision needs its new SHA-256 and a new test (docs/denoise.md).
 variable "HUSH_COMMIT" { default = "9f6414e91461a8f4bdf9840c0cdcdcb7da986339" }

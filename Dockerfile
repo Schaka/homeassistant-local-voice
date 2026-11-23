@@ -21,7 +21,7 @@ ARG DEBIAN_VERSION=trixie
 # Debian ships glslc, so shaderc is not built from source.
 # ============================================================================
 FROM debian:${DEBIAN_VERSION}-slim AS audiocpp-builder
-ARG AUDIOCPP_COMMIT=fc3852a26b96f2b221cb78d67095bd96aac98e0c
+ARG AUDIOCPP_COMMIT=9999a82e267ebf7088971ac277af77b3dd654a84
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         git cmake ninja-build g++ python3 python3-venv ca-certificates curl \
         glslc libvulkan-dev spirv-headers \
@@ -41,7 +41,7 @@ RUN ./scripts/build_linux.sh --backend vulkan --native-cpu OFF \
 # any CPU with AVX2 and FMA. scripts/build-ik-llama.sh also runs in CI.
 # ============================================================================
 FROM debian:${DEBIAN_VERSION}-slim AS ikllama-builder
-ARG IKLLAMA_COMMIT=900e08c01cd8adcfeaebf9fd89f646c48837a14b
+ARG IKLLAMA_COMMIT=1180df7edc2349470b651b64cade01341b52e0af
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         git cmake g++ make ca-certificates \
     && rm -rf /var/lib/apt/lists/*
@@ -66,7 +66,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
 # ggml inside libparakeet.so or audiocpp_server.
 # ============================================================================
 FROM debian:${DEBIAN_VERSION}-slim AS llamacpp-stage
-ARG LLAMACPP_BUILD=b12428
+ARG LLAMACPP_BUILD=b12649
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends curl ca-certificates \
     && curl -fsSL "https://github.com/ggml-org/llama.cpp/releases/download/${LLAMACPP_BUILD}/llama-${LLAMACPP_BUILD}-bin-ubuntu-vulkan-x64.tar.gz" | tar xz \
     && mv "/llama-${LLAMACPP_BUILD}" /llama.cpp \
@@ -108,7 +108,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
 # the Python of the runtime base (3.13 on trixie). Its web server never runs.
 # ============================================================================
 FROM debian:${DEBIAN_VERSION}-slim AS searxng-stage
-ARG SEARXNG_COMMIT=2d500cb6b8e98b5f57fb446786e91f8de03be89f
+ARG SEARXNG_COMMIT=a7163d091037cae586c444b05f22ecca162bb492
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         python3 python3-venv git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
