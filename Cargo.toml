@@ -29,7 +29,7 @@ tokio-tungstenite = { version = "0.30.0", default-features = false, features = [
 tokio-util = "0.7.20"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
-url = "2.5.8"
+url = "2.5.9"
 uuid = { version = "1.29.0", features = ["v4"] }
 
 [dev-dependencies]
