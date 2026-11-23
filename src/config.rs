@@ -117,7 +117,9 @@ impl Family {
     /// (docs/llm.md), and a larger budget only adds time.
     pub fn default_reasoning_budget(self) -> &'static str {
         match self {
-            Self::Ling3 | Self::Minicpm5 | Self::Lfm3 => "128",
+            Self::Ling3 | Self::Minicpm5 => "128",
+            // Measured on 2026-11-24: as many right answers as 128, a third less time (docs/llm.md).
+            Self::Lfm3 => "64",
             Self::Qwen35 | Self::Granite4 => "512",
         }
     }
@@ -639,7 +641,7 @@ mod tests {
 
     #[test]
     fn budgets_per_family() {
-        assert_eq!(Family::Lfm3.default_reasoning_budget(), "128");
+        assert_eq!(Family::Lfm3.default_reasoning_budget(), "64");
         assert_eq!(Family::Minicpm5.default_reasoning_budget(), "128");
         assert_eq!(Family::Ling3.default_reasoning_budget(), "128");
         assert_eq!(Family::Qwen35.default_reasoning_budget(), "512");
@@ -762,7 +764,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(c.family, Family::Lfm3);
-        assert_eq!(c.reasoning_budget, "128");
+        assert_eq!(c.reasoning_budget, "64");
         let e = err(&[("LLM_MODEL_FILENAME", "x.gguf"), ("LLM_FAMILY", "llama")]);
         assert!(e.contains("unknown LLM_FAMILY=llama"), "{e}");
     }

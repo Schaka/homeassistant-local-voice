@@ -271,11 +271,25 @@ Measured on 2026-11-01 with 10 Home Assistant style questions: a question, a too
 | Ling-3.0-tiny Q4_K_M | Fix, budget 512 | 9 of 10 | 2.9 s |
 | Ling-3.0-tiny Q4_K_M | Fix, budget 128 (default) | 9 of 10 | 3.3 s |
 
-The defaults of `LLM_REASONING_BUDGET` are 128 for `ling3`, `minicpm5` and `lfm3`, and 512 for the others. The 7 of 10 of MiniCPM5 at 128 is one run of 10 questions. The larger test below measured no loss. Set the variable, or `--reasoning-budget` in `LLM_EXTRA_ARGS`, to choose another value. `LLM_MAX_TOKENS` (default 1024) sets the limit for one reply with `--n-predict`. As a result, a template that never closes its thinking block cannot generate until the 64k context is full. The question that all models got wrong was "turn off all the lights downstairs": they switched one room instead of the floor. The prompt of Home Assistant, with floors and areas, helps there.
+The defaults of `LLM_REASONING_BUDGET` are 64 for `lfm3`, 128 for `ling3` and `minicpm5`, and 512 for the others. The measurement of 64 for LFM3 is in "Thinking budget and quant of LFM3" below. The 7 of 10 of MiniCPM5 at 128 is one run of 10 questions. The larger test below measured no loss. Set the variable, or `--reasoning-budget` in `LLM_EXTRA_ARGS`, to choose another value. `LLM_MAX_TOKENS` (default 1024) sets the limit for one reply with `--n-predict`. As a result, a template that never closes its thinking block cannot generate until the 64k context is full. The question that all models got wrong was "turn off all the lights downstairs": they switched one room instead of the floor. The prompt of Home Assistant, with floors and areas, helps there.
 
 The token speed was not the problem: LFM3 generated 42 tokens per second, MiniCPM5 25 and Ling 35 on this CPU. The time went into thinking. Other settings did not help:
 
 1. A smaller micro-batch (`-ub 128` or `-ub 256`) or denser context checkpoints (`--checkpoint-min-step 0`). LFM3 and Ling have layers without a KV cache, which llama.cpp can only rewind to a saved checkpoint. With the defaults, LFM3 processes about 500 tokens again for each request (about 3 s here). The smaller micro-batches made one of the two request types fast and the other one process the whole prompt again. Ling processes only 60 to 150 tokens again with the defaults.
+
+### Thinking budget and quant of LFM3
+
+Measured on 2026-11-24 with the 59 questions of the set `home-assistant` and the system prompt and the 38 tools of a real home (temperature 0.1). Accuracy: llama.cpp on a Radeon RX 9070 XT (Vulkan), 3 runs, 177 answers. Speed: ik_llama.cpp on 8 cores of a Core Ultra 7 270K, 1 run, 59 answers. A leak is an answer that continues the thinking as normal text ("We need to pause the music ... Let's check ..."), up to 600 words that TTS reads aloud.
+
+| LFM3-1.7B | Correct (GPU) | Leaks (GPU) | Correct (CPU) | Leaks (CPU) | Median time per question (CPU) |
+|---|---|---|---|---|---|
+| Q8_0, budget 128 | 108 of 177 | 19 | 40 of 59 | 2 | 6.4 s |
+| Q8_0, budget 64 | 107 of 177 | 16 | 42 of 59 | 0 | 4.3 s |
+| Q8_0, budget 256 | | | 42 of 59 | 2 | 9.8 s |
+| Q4_K_M, budget 128 | 105 of 177 | 14 | 35 of 59 | 1 | 4.7 s |
+| Q8_0, budget 64, a word limit in the prompt | 109 of 177 | 18 | 42 of 59 | 0 | 4.4 s |
+
+A budget of 64 gives as many right answers as 128 in a third less time, so it is the default for `lfm3`. Q4_K_M generates faster (53 against 36 tokens/s), but it was less accurate and slower per question than Q8_0 with budget 64. The word limit ("Answer in one short sentence of at most 15 words.") made the longest answers shorter: 90 % of the answers had at most 16 words, against 25 without it. llama.cpp leaked the thinking in about one answer of ten with every setting, ik_llama.cpp in up to 2 of 59.
 
 ### Quality by thinking budget
 
