@@ -526,4 +526,14 @@ mod tests {
         assert_eq!(stem.len(), 19, "{stem}");
         assert_eq!(now.strftime("%Y-%m-%d").to_string().len(), 10);
     }
+
+    /// `TZ=Europe/Berlin` needs the time zone database of the system
+    /// (`/usr/share/zoneinfo`, feature `tzdb-zoneinfo`). Without it, jiff
+    /// falls back to UTC and the log shows UTC times.
+    #[test]
+    fn a_named_time_zone_is_found() {
+        let berlin = jiff::tz::db().get("Europe/Berlin").expect("Europe/Berlin in the system database");
+        let winter = jiff::Timestamp::from_second(1_795_464_000).unwrap(); // 2026-11-23T16:00:00Z
+        assert_eq!(berlin.to_offset(winter).seconds(), 3600);
+    }
 }

@@ -13,7 +13,7 @@ axum = { version = "0.8.9", default-features = false, features = ["http1", "json
 bytes = "1.12.1"
 clap = { version = "4.6.7", features = ["derive"] }
 futures-util = "0.3.34"
-jiff = { version = "1.0.1", default-features = false, features = ["std", "tz-system"] }
+jiff = { version = "1.0.1", default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo"] }
 hyper = { version = "1.12.0", features = ["http1", "server"] }
 hyper-util = { version = "0.1.21", features = ["tokio", "server", "http1", "service"] }
 libc = "0.2.191"
