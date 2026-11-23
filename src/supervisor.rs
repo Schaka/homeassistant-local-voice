@@ -128,7 +128,13 @@ async fn watch(
     fatal: CancellationToken,
     cancel: CancellationToken,
 ) {
-    let client = match reqwest::Client::builder().timeout(health.timeout).build() {
+    // No idle connection between two probes: a child that stops would close
+    // it itself and hold its port in TIME_WAIT for 60 s.
+    let client = match reqwest::Client::builder()
+        .timeout(health.timeout)
+        .pool_max_idle_per_host(0)
+        .build()
+    {
         Ok(client) => client,
         Err(err) => {
             tracing::error!("[{name}] watchdog disabled: {err}");

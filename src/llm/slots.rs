@@ -112,7 +112,9 @@ fn prompt_tokens(slot: &Value) -> i64 {
 impl SlotCache {
     pub fn new(port: u16, dir: PathBuf, file: String, starts: Arc<AtomicU64>, poll: Duration) -> Result<Self> {
         Ok(Self {
-            client: reqwest::Client::builder().build()?,
+            // No idle connections, so that a stop of llama-server leaves no
+            // socket in TIME_WAIT on its port (see `specs.rs`).
+            client: reqwest::Client::builder().pool_max_idle_per_host(0).build()?,
             base: format!("http://127.0.0.1:{port}"),
             dir,
             file,

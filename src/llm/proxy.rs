@@ -23,6 +23,8 @@ use futures_util::StreamExt;
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
+use super::defer::{self, Deferral, Prepared, ToolCall};
+
 /// The largest chat request that the proxy buffers for a possible repeat.
 const MAX_CHAT_BODY: usize = 16 * 1024 * 1024;
 
@@ -49,6 +51,8 @@ pub struct LlmProxy {
     retry_empty: bool,
     /// Move the area line of Home Assistant to the last user message.
     area_in_user: bool,
+    /// Leave the matching tools out of the prompt, see `defer.rs`.
+    defer: Option<Deferral>,
 }
 
 /// The state of llama-server, from its own `/health`.
@@ -112,6 +116,12 @@ impl LlmProxy {
             .connect_timeout(Duration::from_secs(3))
             // Pass bodies through as they are, also compressed ones.
             .no_gzip()
+            // No idle connections to llama-server. When llama-server stops, it
+            // closes each open connection itself, and that socket holds its
+            // port in TIME_WAIT for 60 s. ik_llama.cpp cannot bind the port
+            // then (`specs.rs`). A new connection on 127.0.0.1 costs well
+            // under a millisecond.
+            .pool_max_idle_per_host(0)
             .build()?;
         Ok(Self {
             client,
@@ -120,7 +130,15 @@ impl LlmProxy {
             in_flight: Arc::default(),
             retry_empty: false,
             area_in_user: false,
+            defer: None,
         })
+    }
+
+    /// Leaves the tools that match `patterns` out of the prompt until the
+    /// model asks for them (`defer.rs`). An empty list turns it off.
+    pub fn with_deferred_tools(mut self, patterns: Vec<String>) -> Self {
+        self.defer = (!patterns.is_empty()).then(|| Deferral::new(patterns));
+        self
     }
 
     /// Turns the move of the area line on or off, see `area_to_user_message`.
@@ -170,7 +188,10 @@ impl LlmProxy {
         let in_flight = InFlight::new(&self.in_flight);
         let path = backend_path(&parts.uri);
         let url = format!("{}{}", self.backend, path);
-        if (self.retry_empty || self.area_in_user) && parts.method == Method::POST && is_chat_path(&path) {
+        if (self.retry_empty || self.area_in_user || self.defer.is_some())
+            && parts.method == Method::POST
+            && is_chat_path(&path)
+        {
             return self.forward_chat(&parts.headers, url, body, in_flight).await;
         }
         let method = reqwest::Method::from_bytes(parts.method.as_str().as_bytes()).unwrap_or(reqwest::Method::GET);
@@ -196,7 +217,8 @@ impl LlmProxy {
     }
 
     /// A chat request. A reply that has no text and no tool call is repeated
-    /// once with thinking off, see the module comment.
+    /// once with thinking off, see the module comment. With deferred tools,
+    /// the proxy answers the search calls of the model itself (`defer.rs`).
     async fn forward_chat(&self, headers: &HeaderMap, url: String, body: Body, in_flight: InFlight) -> Response {
         let Ok(bytes) = axum::body::to_bytes(body, MAX_CHAT_BODY).await else {
             return error(
@@ -212,52 +234,58 @@ impl LlmProxy {
         } else {
             bytes
         };
-        let retry_body = if self.retry_empty {
-            without_thinking(&bytes)
-        } else {
-            None
-        };
+        let defer = self.defer.as_ref().and_then(|d| d.prepare(&bytes));
+        let bytes = defer.as_ref().and_then(Prepared::bytes).unwrap_or(bytes);
+        let retry = self.retry_empty && without_thinking(&bytes).is_some();
         let resp = match self
             .outgoing(reqwest::Method::POST, &url, headers)
-            .body(bytes)
+            .body(bytes.clone())
             .send()
             .await
         {
             Ok(resp) => resp,
             Err(err) => return send_error(&err),
         };
-        let Some(retry_body) = retry_body.filter(|_| resp.status().is_success()) else {
+        if !resp.status().is_success() || (!retry && defer.is_none()) {
             return relay(resp, in_flight);
-        };
-        let retry = Retry {
+        }
+        let chat = Chat {
             proxy: self.clone(),
             url,
             headers: headers.clone(),
-            body: retry_body,
+            body: bytes,
+            retry,
+            defer,
         };
         if is_event_stream(&resp) {
-            retry.stream(resp, in_flight)
+            chat.stream(resp, in_flight)
         } else {
-            retry.json(resp, in_flight).await
+            chat.json(resp, in_flight).await
         }
     }
 }
 
-/// The data to repeat one chat request without thinking.
-struct Retry {
+/// One chat request that the proxy may send more than once: again without
+/// thinking after an empty reply, and with a search step after a search call.
+struct Chat {
     proxy: LlmProxy,
     url: String,
     headers: HeaderMap,
+    /// The body of the last request to llama-server.
     body: Bytes,
+    /// Repeat an empty reply once without thinking.
+    retry: bool,
+    /// The rewritten request with deferred tools.
+    defer: Option<Prepared>,
 }
 
-impl Retry {
-    /// Sends the repeated request. `None` if llama-server does not accept it.
-    async fn send(&self) -> Option<reqwest::Response> {
+impl Chat {
+    /// Sends one more request. `None` if llama-server does not accept it.
+    async fn send(&self, body: Bytes) -> Option<reqwest::Response> {
         let resp = self
             .proxy
             .outgoing(reqwest::Method::POST, &self.url, &self.headers)
-            .body(self.body.clone())
+            .body(body)
             .send()
             .await;
         match resp {
@@ -273,9 +301,32 @@ impl Retry {
         }
     }
 
+    /// Adds the answer to the search calls of the model to the request.
+    /// `None` if the reply has other calls, or the search limit is reached.
+    fn search_step(&mut self, calls: &[ToolCall], searches: &mut usize) -> Option<(Bytes, Vec<Value>)> {
+        let prepared = self.defer.as_mut()?;
+        if *searches >= defer::MAX_SEARCHES || !defer::only_searches(calls) {
+            return None;
+        }
+        *searches += 1;
+        let step = prepared.answer(calls);
+        prepared.with_step(&step);
+        let body = prepared.bytes()?;
+        self.body = body.clone();
+        Some((body, step))
+    }
+
+    /// Keeps the search steps of this reply for the next requests.
+    fn remember(&self, calls: &[ToolCall], steps: &[Value]) {
+        if let Some(d) = &self.proxy.defer {
+            d.remember(calls, steps);
+        }
+    }
+
     /// Streams the events to the client. The events from the first one with a
     /// `finish_reason` on wait until the end, because a client stops at that
-    /// event.
+    /// event. With deferred tools, the events from the first tool call on
+    /// wait too, so that a search call never reaches the client.
     fn stream(self, resp: reqwest::Response, in_flight: InFlight) -> Response {
         let (status, headers) = (resp.status(), resp.headers().clone());
         let (tx, rx) = mpsc::channel(32);
@@ -287,47 +338,83 @@ impl Retry {
         response_from(status, &headers, Body::from_stream(body))
     }
 
-    async fn run_stream(&self, resp: reqwest::Response, tx: Sender) {
-        let first = pump(resp, &tx).await;
-        if first.end != End::Done {
-            return;
-        }
-        if first.finished && !first.output {
+    async fn run_stream(mut self, mut resp: reqwest::Response, tx: Sender) {
+        let hold_calls = self.defer.is_some();
+        let mut searches = 0;
+        let mut steps: Vec<Value> = Vec::new();
+        let mut last = loop {
+            let pumped = pump(resp, &tx, hold_calls).await;
+            if pumped.end != End::Done {
+                return;
+            }
+            let Some((body, step)) = self.search_step(&pumped.calls, &mut searches) else {
+                break pumped;
+            };
+            steps.extend(step);
+            match self.send(body).await.filter(is_event_stream) {
+                Some(next) => resp = next,
+                None => break pumped,
+            }
+        };
+        if self.retry && last.finished && !last.output {
             tracing::warn!("LLM reply has no text and no tool call, repeating the request without thinking");
-            if let Some(resp) = self.send().await.filter(is_event_stream) {
-                let second = pump(resp, &tx).await;
+            if let Some(body) = without_thinking(&self.body)
+                && let Some(resp) = self.send(body).await.filter(is_event_stream)
+            {
+                let second = pump(resp, &tx, hold_calls).await;
                 if second.end != End::Done {
                     return;
                 }
                 if second.output {
-                    release(second.held, &tx).await;
-                    return;
-                }
-                tracing::warn!("the repeated LLM reply is empty too");
-            }
-        }
-        release(first.held, &tx).await;
-    }
-
-    /// A reply that is not streamed.
-    async fn json(self, resp: reqwest::Response, in_flight: InFlight) -> Response {
-        let _counted = in_flight;
-        let (status, headers) = (resp.status(), resp.headers().clone());
-        let body = match resp.bytes().await {
-            Ok(body) => body,
-            Err(err) => return send_error(&err),
-        };
-        if reply_is_empty(&body) {
-            tracing::warn!("LLM reply has no text and no tool call, repeating the request without thinking");
-            if let Some(resp) = self.send().await {
-                let (status, headers) = (resp.status(), resp.headers().clone());
-                if let Ok(second) = resp.bytes().await {
-                    if !reply_is_empty(&second) {
-                        return response_from(status, &headers, Body::from(second));
-                    }
+                    last = second;
+                } else {
                     tracing::warn!("the repeated LLM reply is empty too");
                 }
             }
+        }
+        if !steps.is_empty() {
+            self.remember(&last.calls, &steps);
+        }
+        release(last.held, &tx).await;
+    }
+
+    /// A reply that is not streamed.
+    async fn json(mut self, mut resp: reqwest::Response, in_flight: InFlight) -> Response {
+        let _counted = in_flight;
+        let mut searches = 0;
+        let mut steps: Vec<Value> = Vec::new();
+        let (mut status, mut headers, mut body) = loop {
+            let (status, headers) = (resp.status(), resp.headers().clone());
+            let body = match resp.bytes().await {
+                Ok(body) => body,
+                Err(err) => return send_error(&err),
+            };
+            let Some((next, step)) = self.search_step(&reply_calls(&body), &mut searches) else {
+                break (status, headers, body);
+            };
+            steps.extend(step);
+            match self.send(next).await {
+                Some(next) => resp = next,
+                None => break (status, headers, body),
+            }
+        };
+        if self.retry && reply_is_empty(&body) {
+            tracing::warn!("LLM reply has no text and no tool call, repeating the request without thinking");
+            if let Some(retry) = without_thinking(&self.body)
+                && let Some(resp) = self.send(retry).await
+            {
+                let (s, h) = (resp.status(), resp.headers().clone());
+                if let Ok(second) = resp.bytes().await {
+                    if reply_is_empty(&second) {
+                        tracing::warn!("the repeated LLM reply is empty too");
+                    } else {
+                        (status, headers, body) = (s, h, second);
+                    }
+                }
+            }
+        }
+        if !steps.is_empty() {
+            self.remember(&reply_calls(&body), &steps);
         }
         response_from(status, &headers, Body::from(body))
     }
@@ -353,7 +440,14 @@ struct Pumped {
     output: bool,
     /// Some event had a `finish_reason`.
     finished: bool,
-    /// The events from the one with the `finish_reason` on.
+    /// Hold the events from the first tool call on, not only from the
+    /// `finish_reason` on.
+    hold_calls: bool,
+    /// Some event had a tool call.
+    called: bool,
+    /// The tool calls of the reply, put together from their deltas.
+    calls: Vec<ToolCall>,
+    /// The events that wait until the end.
     held: Vec<Bytes>,
     end: End,
 }
@@ -364,8 +458,12 @@ impl Pumped {
         let info = classify(&event);
         self.output |= info.text || info.tool_call;
         self.finished |= info.finish;
+        self.called |= info.tool_call;
+        for delta in info.calls {
+            add_call_delta(&mut self.calls, delta);
+        }
         let event = Bytes::from(event);
-        if self.finished {
+        if self.finished || (self.hold_calls && self.called) {
             self.held.push(event);
             true
         } else {
@@ -376,8 +474,11 @@ impl Pumped {
 
 /// Reads the events of one streamed response and sends them on, except for
 /// the held ones.
-async fn pump(resp: reqwest::Response, tx: &Sender) -> Pumped {
-    let mut out = Pumped::default();
+async fn pump(resp: reqwest::Response, tx: &Sender, hold_calls: bool) -> Pumped {
+    let mut out = Pumped {
+        hold_calls,
+        ..Pumped::default()
+    };
     let mut upstream = resp.bytes_stream();
     let mut buf: Vec<u8> = Vec::new();
     loop {
@@ -428,6 +529,52 @@ struct EventInfo {
     text: bool,
     tool_call: bool,
     finish: bool,
+    /// The tool call deltas of the event.
+    calls: Vec<CallDelta>,
+}
+
+/// One part of a streamed tool call. The first part of a call has its ID and
+/// name, the next parts add to its arguments.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct CallDelta {
+    index: usize,
+    id: Option<String>,
+    name: Option<String>,
+    arguments: String,
+}
+
+fn add_call_delta(calls: &mut Vec<ToolCall>, delta: CallDelta) {
+    while calls.len() <= delta.index {
+        calls.push(ToolCall::default());
+    }
+    let call = &mut calls[delta.index];
+    if let Some(id) = delta.id {
+        call.id = id;
+    }
+    if let Some(name) = delta.name {
+        call.name.push_str(&name);
+    }
+    call.arguments.push_str(&delta.arguments);
+}
+
+/// The tool calls of a complete chat reply (not streamed).
+fn reply_calls(body: &[u8]) -> Vec<ToolCall> {
+    let Ok(v) = serde_json::from_slice::<Value>(body) else {
+        return Vec::new();
+    };
+    v["choices"][0]["message"]["tool_calls"]
+        .as_array()
+        .map(|calls| {
+            calls
+                .iter()
+                .map(|c| ToolCall {
+                    id: c["id"].as_str().unwrap_or_default().to_owned(),
+                    name: c["function"]["name"].as_str().unwrap_or_default().to_owned(),
+                    arguments: c["function"]["arguments"].as_str().unwrap_or_default().to_owned(),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn classify(event: &[u8]) -> EventInfo {
@@ -446,6 +593,14 @@ fn classify(event: &[u8]) -> EventInfo {
         info.text |= delta["content"].as_str().is_some_and(|s| !s.trim().is_empty());
         info.tool_call |= delta["tool_calls"].as_array().is_some_and(|a| !a.is_empty());
         info.finish |= !choice["finish_reason"].is_null();
+        for c in delta["tool_calls"].as_array().into_iter().flatten() {
+            info.calls.push(CallDelta {
+                index: c["index"].as_u64().and_then(|i| usize::try_from(i).ok()).unwrap_or(0),
+                id: c["id"].as_str().map(str::to_owned),
+                name: c["function"]["name"].as_str().map(str::to_owned),
+                arguments: c["function"]["arguments"].as_str().unwrap_or_default().to_owned(),
+            });
+        }
     }
     info
 }
@@ -858,6 +1013,136 @@ mod tests {
         assert!(text.contains("\"finish_reason\":\"stop\""));
         assert_eq!(text.matches("[DONE]").count(), 1, "{text}");
         assert_eq!(fake.seen_with("/v1/chat/completions").len(), 2);
+    }
+
+    /// A Home Assistant request with one tool that `LLM_DEFER_TOOLS=on` defers.
+    fn deferred_chat(stream: bool, history: &str) -> Request<Body> {
+        let body = format!(
+            r#"{{"messages":[{{"role":"system","content":"Intro."}},{{"role":"user","content":"set a timer"}}{history}],
+              "tools":[{{"type":"function","function":{{"name":"intent__HassTurnOn","description":"Turns on a device","parameters":{{}}}}}},
+                       {{"type":"function","function":{{"name":"intent__HassStartTimer","description":"Starts a new timer","parameters":{{}}}}}}],
+              "stream":{stream}}}"#
+        );
+        request("POST", "/llm/v1/chat/completions", Body::from(body))
+    }
+
+    fn deferring(proxy: LlmProxy) -> LlmProxy {
+        proxy
+            .with_retry_empty(true)
+            .with_deferred_tools(defer::DEFAULT_PATTERNS.iter().map(|p| (*p).to_owned()).collect())
+    }
+
+    const SEARCH_CALL: &[&str] = &[
+        r#"{"role":"assistant","content":null}"#,
+        r#"{"reasoning_content":"I need a timer tool."}"#,
+        r#"{"tool_calls":[{"index":0,"id":"s1","type":"function","function":{"name":"search_tools","arguments":""}}]}"#,
+        r#"{"tool_calls":[{"index":0,"function":{"arguments":"{\"query\":\"timer\"}"}}]}"#,
+    ];
+    const TIMER_CALL: &[&str] = &[
+        r#"{"role":"assistant","content":null}"#,
+        r#"{"tool_calls":[{"index":0,"id":"t1","type":"function","function":{"name":"intent__HassStartTimer","arguments":"{\"minutes\":5}"}}]}"#,
+    ];
+
+    fn json_reply(id: &str, name: &str, arguments: &str) -> String {
+        serde_json::json!({"choices": [{"finish_reason": "tool_calls", "index": 0, "message": {"role": "assistant",
+            "content": null, "tool_calls": [{"type": "function", "id": id,
+            "function": {"name": name, "arguments": arguments}}]}}]})
+        .to_string()
+    }
+
+    fn seen_json(fake: &Fake) -> Vec<Value> {
+        fake.seen_with("/v1/chat/completions")
+            .iter()
+            .map(|s| serde_json::from_slice(&s.body).unwrap())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn the_proxy_answers_a_streamed_search_and_the_client_sees_only_the_final_call() {
+        let fake = Fake::default();
+        fake.set_stream_script(vec![sse(SEARCH_CALL, "tool_calls"), sse(TIMER_CALL, "tool_calls")]);
+        let proxy = deferring(proxy_to_fake(&fake, None).await);
+        let text = body_text(proxy.forward(deferred_chat(true, "")).await).await;
+        assert!(!text.contains("search_tools"), "{text}");
+        assert!(text.contains("intent__HassStartTimer"), "{text}");
+        assert!(
+            text.contains("I need a timer tool."),
+            "the thinking before the call streams on: {text}"
+        );
+        assert_eq!(text.matches("[DONE]").count(), 1, "{text}");
+        assert_eq!(text.matches(r#""finish_reason":"tool_calls""#).count(), 1, "{text}");
+
+        let seen = seen_json(&fake);
+        assert_eq!(seen.len(), 2);
+        assert_eq!(
+            seen[0]["chat_template_kwargs"]["deferred_tools"],
+            json!(["intent__HassStartTimer"])
+        );
+        assert_eq!(seen[0]["tools"][2]["function"]["name"], "search_tools");
+        let step = seen[1]["messages"].as_array().unwrap();
+        assert_eq!(step.len(), 4);
+        assert_eq!(
+            step[2]["tool_calls"][0]["function"]["arguments"],
+            r#"{"query":"timer"}"#
+        );
+        let result = step[3]["content"].as_str().unwrap();
+        assert!(
+            result.starts_with("Found 1 tool.\n<additional_tools>\n{\"name\": \"intent__HassStartTimer\""),
+            "{result}"
+        );
+
+        // The next request of Home Assistant gets the search step back.
+        fake.set_stream_script(vec![sse(TOOL_CALL, "tool_calls")]);
+        let history = r#",{"role":"assistant","content":"","tool_calls":[{"id":"t1","type":"function","function":{"name":"intent__HassStartTimer","arguments":"{\"minutes\":5}"}}]},{"role":"tool","tool_call_id":"t1","content":"ok"}"#;
+        body_text(proxy.forward(deferred_chat(true, history)).await).await;
+        let seen = seen_json(&fake);
+        let roles: Vec<&str> = seen[2]["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m["role"].as_str().unwrap())
+            .collect();
+        assert_eq!(roles, ["system", "user", "assistant", "tool", "assistant", "tool"]);
+        assert_eq!(seen[2]["messages"][2]["tool_calls"][0]["id"], "s1");
+    }
+
+    #[tokio::test]
+    async fn the_proxy_answers_a_search_in_a_reply_that_is_not_streamed() {
+        let fake = Fake::default();
+        fake.set_chat_script(vec![
+            json_reply("s1", "search_tools", r#"{"query":"timer"}"#),
+            json_reply("t1", "intent__HassStartTimer", "{}"),
+        ]);
+        let proxy = deferring(proxy_to_fake(&fake, None).await);
+        let v: Value = serde_json::from_str(&body_text(proxy.forward(deferred_chat(false, "")).await).await).unwrap();
+        assert_eq!(
+            v["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
+            "intent__HassStartTimer"
+        );
+        assert_eq!(seen_json(&fake).len(), 2);
+    }
+
+    #[tokio::test]
+    async fn the_searches_of_one_reply_have_a_limit() {
+        let fake = Fake::default();
+        fake.set_stream_script(vec![sse(SEARCH_CALL, "tool_calls")]);
+        let proxy = deferring(proxy_to_fake(&fake, None).await);
+        let text = body_text(proxy.forward(deferred_chat(true, "")).await).await;
+        assert_eq!(seen_json(&fake).len(), defer::MAX_SEARCHES + 1);
+        assert!(text.contains("search_tools"), "the last reply goes on as it is: {text}");
+        assert_eq!(text.matches("[DONE]").count(), 1, "{text}");
+    }
+
+    #[tokio::test]
+    async fn a_request_without_deferred_tools_streams_as_before() {
+        let fake = Fake::default();
+        fake.set_stream_script(vec![sse(TOOL_CALL, "tool_calls")]);
+        let proxy = deferring(proxy_to_fake(&fake, None).await);
+        let text = stream_text(&proxy).await;
+        assert!(text.contains("\"tool_calls\""));
+        let seen = seen_json(&fake);
+        assert_eq!(seen.len(), 1);
+        assert!(seen[0].get("chat_template_kwargs").is_none());
     }
 
     #[tokio::test]

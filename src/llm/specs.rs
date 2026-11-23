@@ -6,8 +6,10 @@
 //! the next start runs ik_llama.cpp. An ik_llama.cpp that fails twice is
 //! replaced by llama.cpp (`engine.rs`).
 
+use std::net::Ipv4Addr;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
+use std::time::{Duration, Instant};
 
 use crate::config::LlmConfig;
 use crate::supervisor::{ChildSpec, Ended, RunOutcome, SpecSource};
@@ -143,7 +145,62 @@ impl LlmSpecs {
 
 impl SpecSource for LlmSpecs {
     async fn next(&mut self, last: Option<RunOutcome>) -> ChildSpec {
-        self.plan(last).await.1
+        let (decision, spec) = self.plan(last).await;
+        if decision.kind == EngineKind::Ik {
+            wait_for_free_port(self.cfg.internal_port, PORT_WAIT).await;
+        }
+        spec
+    }
+}
+
+/// The longest wait for the port before ik_llama.cpp starts. A socket in
+/// TIME_WAIT holds the port for 60 s on Linux.
+const PORT_WAIT: Duration = Duration::from_secs(90);
+
+/// ik_llama.cpp binds its port without `SO_REUSEADDR`. After a stop of
+/// llama-server, the connections that the server closed stay in FIN_WAIT2 or
+/// TIME_WAIT on that port, and ik_llama.cpp exits with "couldn't bind to
+/// server socket". llama.cpp binds with `SO_REUSEADDR`, so it starts at once.
+/// This waits until a bind without that option works, or until `limit`.
+async fn wait_for_free_port(port: u16, limit: Duration) {
+    let began = Instant::now();
+    let mut logged = false;
+    while !port_binds_without_reuse(port) {
+        if began.elapsed() >= limit {
+            tracing::warn!("port {port} is still held after {limit:?}, starting ik_llama.cpp anyway");
+            return;
+        }
+        if !logged {
+            tracing::info!("port {port} is held by closed connections, waiting before ik_llama.cpp starts");
+            logged = true;
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    if logged {
+        tracing::info!("port {port} is free after {:.1} s", began.elapsed().as_secs_f64());
+    }
+}
+
+/// `true` if a socket without `SO_REUSEADDR` can bind 127.0.0.1:`port`. The
+/// standard library sets that option on Unix, so it cannot make this test.
+fn port_binds_without_reuse(port: u16) -> bool {
+    // SAFETY: plain socket calls on a socket that this function owns and
+    // closes. `addr` is a fully initialized sockaddr_in, and its size is passed.
+    unsafe {
+        let fd = libc::socket(libc::AF_INET, libc::SOCK_STREAM | libc::SOCK_CLOEXEC, 0);
+        if fd < 0 {
+            return true;
+        }
+        let mut addr: libc::sockaddr_in = std::mem::zeroed();
+        addr.sin_family = libc::sa_family_t::try_from(libc::AF_INET).unwrap_or_default();
+        addr.sin_port = port.to_be();
+        addr.sin_addr = libc::in_addr {
+            s_addr: u32::from(Ipv4Addr::LOCALHOST).to_be(),
+        };
+        let len = libc::socklen_t::try_from(std::mem::size_of::<libc::sockaddr_in>()).unwrap_or(0);
+        let ok = libc::bind(fd, (&raw const addr).cast::<libc::sockaddr>(), len) == 0;
+        libc::close(fd);
+        ok
     }
 }
 
@@ -326,9 +383,60 @@ mod tests {
         assert_eq!(plan(&r).await.0.kind, EngineKind::Ik);
     }
 
+    /// A port that nothing holds right now.
+    fn free_port() -> u16 {
+        std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port()
+    }
+
+    #[test]
+    fn a_listener_holds_the_port_and_its_end_frees_it() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        assert!(!port_binds_without_reuse(port));
+        drop(listener);
+        assert!(port_binds_without_reuse(port));
+    }
+
+    #[test]
+    fn a_connection_that_the_server_closed_holds_the_port_for_a_bind_without_reuse() {
+        use std::io::Read;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let mut client = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let (served, _) = listener.accept().unwrap();
+        // The server closes first, as llama-server does at its stop.
+        drop(served);
+        drop(listener);
+        let mut buf = [0u8; 1];
+        assert_eq!(client.read(&mut buf).unwrap(), 0, "the client sees the end");
+        assert!(!port_binds_without_reuse(port), "FIN_WAIT2 or TIME_WAIT holds the port");
+        // A bind with SO_REUSEADDR, as llama.cpp and the standard library do it, works.
+        assert!(std::net::TcpListener::bind(("127.0.0.1", port)).is_ok());
+    }
+
+    #[tokio::test]
+    async fn the_wait_for_the_port_ends_at_its_limit() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let began = Instant::now();
+        wait_for_free_port(port, Duration::from_millis(600)).await;
+        assert!(began.elapsed() >= Duration::from_millis(600));
+        let began = Instant::now();
+        wait_for_free_port(free_port(), Duration::from_secs(5)).await;
+        assert!(
+            began.elapsed() < Duration::from_millis(100),
+            "a free port needs no wait"
+        );
+    }
+
     #[tokio::test]
     async fn the_spec_source_counts_starts_in_one_counter() {
-        let r = rig("bailingmoe3");
+        let mut r = rig("bailingmoe3");
+        r.cfg.internal_port = free_port();
         let mut s = setup_on(&r.cfg, host());
         let a = s.specs.next(None).await;
         let b = s.specs.next(None).await;

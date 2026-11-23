@@ -220,6 +220,10 @@ pub struct LlmConfig {
     /// message to the last user message, so that all satellites share one
     /// prompt cache.
     pub area_in_user: bool,
+    /// Name patterns of the Home Assistant tools that the proxy leaves out of
+    /// the prompt until the model asks for them with `search_tools`. Empty:
+    /// every tool stays in the prompt. Only for LFM3 (`src/llm/defer.rs`).
+    pub defer_tools: Vec<String>,
     pub internal_port: u16,
     pub hf_cache_dir: PathBuf,
     pub slot_dir: PathBuf,
@@ -248,6 +252,7 @@ impl LlmConfig {
             template_fix: true,
             retry_empty: true,
             area_in_user: true,
+            defer_tools: vec![],
             internal_port: 8081,
             hf_cache_dir: PathBuf::from("/models/llm/hf"),
             slot_dir: PathBuf::from("/models/llm/slots"),
@@ -347,6 +352,35 @@ fn var(name: &str) -> Option<String> {
 
 fn var_or(name: &str, default: &str) -> String {
     var(name).unwrap_or_else(|| default.to_owned())
+}
+
+/// `LLM_DEFER_TOOLS`: `off`, `on` (the default patterns) or a comma list of
+/// tool name patterns with `*`. Other families than LFM3 get an empty list,
+/// because only the LFM3 chat template can hide tools.
+fn defer_tools_from_env(family: Family) -> Result<Vec<String>> {
+    let patterns: Vec<String> = match var("LLM_DEFER_TOOLS").as_deref() {
+        None | Some("off") => return Ok(vec![]),
+        Some("on") => crate::llm::defer::DEFAULT_PATTERNS
+            .iter()
+            .map(|p| (*p).to_owned())
+            .collect(),
+        Some(list) => list
+            .split(',')
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+            .map(str::to_owned)
+            .collect(),
+    };
+    if patterns.iter().any(|p| p.contains(char::is_whitespace)) {
+        bail!(
+            "LLM_DEFER_TOOLS has a pattern with a space (expected off, on or tool name patterns separated by commas)"
+        );
+    }
+    if family != Family::Lfm3 {
+        tracing::warn!("LLM_DEFER_TOOLS works only with LLM_FAMILY=lfm3, every tool stays in the prompt");
+        return Ok(vec![]);
+    }
+    Ok(patterns)
 }
 
 fn on_off(name: &str, default: bool) -> Result<bool> {
@@ -503,6 +537,7 @@ impl Config {
             template_fix: on_off("LLM_TEMPLATE_FIX", true)?,
             retry_empty: on_off("LLM_RETRY_EMPTY", true)?,
             area_in_user: on_off("LLM_AREA_IN_USER", true)?,
+            defer_tools: defer_tools_from_env(family)?,
             internal_port: 8081,
             hf_cache_dir: llm_dir.join("hf"),
             slot_dir: llm_dir.join("slots"),
@@ -802,6 +837,36 @@ mod tests {
         assert_eq!(c.ik_bin, PathBuf::from("/x/ik"));
         let e = format!("{:#}", engine(&[("LLM_ENGINE", "vllm")]).unwrap_err());
         assert!(e.contains("unknown LLM_ENGINE=vllm"), "{e}");
+    }
+
+    #[test]
+    fn deferred_tools_are_off_by_default_and_only_for_lfm3() {
+        let lfm = |v: &[(&str, &str)]| {
+            let mut vars = vec![("LLM_MODEL_FILENAME", "LFM3-1.7B-Q8_0.gguf")];
+            vars.extend_from_slice(v);
+            llm(&vars)
+        };
+        assert!(lfm(&[]).unwrap().unwrap().defer_tools.is_empty());
+        assert!(
+            lfm(&[("LLM_DEFER_TOOLS", "off")])
+                .unwrap()
+                .unwrap()
+                .defer_tools
+                .is_empty()
+        );
+        let on = lfm(&[("LLM_DEFER_TOOLS", "on")]).unwrap().unwrap();
+        assert_eq!(on.family, Family::Lfm3);
+        assert_eq!(on.defer_tools, crate::llm::defer::DEFAULT_PATTERNS);
+        let list = lfm(&[("LLM_DEFER_TOOLS", " intent__*Timer* ,media_player__HassMediaPause,")])
+            .unwrap()
+            .unwrap();
+        assert_eq!(list.defer_tools, ["intent__*Timer*", "media_player__HassMediaPause"]);
+        let e = format!("{:#}", lfm(&[("LLM_DEFER_TOOLS", "intent__ Timer")]).unwrap_err());
+        assert!(e.contains("LLM_DEFER_TOOLS"), "{e}");
+        let ling = llm(&[("LLM_MODEL_FILENAME", "Ling-3.0-tiny.gguf"), ("LLM_DEFER_TOOLS", "on")])
+            .unwrap()
+            .unwrap();
+        assert!(ling.defer_tools.is_empty(), "only the LFM3 template can hide tools");
     }
 
     #[test]

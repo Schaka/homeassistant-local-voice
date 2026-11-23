@@ -75,8 +75,12 @@ enum Command {
 
 #[derive(Subcommand)]
 enum EvalCmd {
-    /// Ask the questions of src/llm/assist.json and score the answers.
+    /// Ask the questions of a fixture and score the answers.
     Llm {
+        /// The questions: `assist` (src/llm/assist.json), `home-assistant`
+        /// (src/llm/assist-ha.json) or the path of a fixture file.
+        #[arg(long, default_value = "assist")]
+        fixture: String,
         /// The hub. The questions go to http://ADDR/llm/v1.
         #[arg(long, default_value = "127.0.0.1:10300")]
         addr: String,
@@ -216,6 +220,7 @@ async fn print_llm_command() -> Result<()> {
 fn run_eval(what: EvalCmd) -> ExitCode {
     let result = match what {
         EvalCmd::Llm {
+            fixture,
             addr,
             base_url,
             key,
@@ -227,7 +232,7 @@ fn run_eval(what: EvalCmd) -> ExitCode {
             out,
         } => runtime().and_then(|rt| {
             rt.block_on(async {
-                let fx = llm::eval::Fixture::builtin()?;
+                let fx = llm::eval::Fixture::load(&fixture)?;
                 let opts = llm::eval::RunOptions {
                     base_url: base_url.unwrap_or_else(|| format!("http://{addr}/llm/v1")),
                     key,
@@ -391,7 +396,8 @@ async fn run(cfg: Config) -> Result<bool> {
             Some(
                 llm::proxy::LlmProxy::new(llm_cfg.internal_port, llm_cfg.api_key.clone())?
                     .with_retry_empty(llm_cfg.reasoning && llm_cfg.retry_empty)
-                    .with_area_in_user(llm_cfg.area_in_user),
+                    .with_area_in_user(llm_cfg.area_in_user)
+                    .with_deferred_tools(llm_cfg.defer_tools.clone()),
             )
         }
         None => None,

@@ -145,7 +145,7 @@ ik_llama.cpp is a fork of llama.cpp with faster CPU code. It runs on the CPU onl
 
 In every other case, llama.cpp runs the model. The log names the engine and the reason at each start (`LLM engine: ...`). `LLM_ENGINE=llamacpp` always uses llama.cpp. `LLM_ENGINE=ik` uses ik_llama.cpp for any model on the CPU, also one that is not in the table. The server does not test such a model.
 
-If ik_llama.cpp fails to start twice in a row, or stops within two minutes of a start twice in a row, llama.cpp runs the model until the next start of the container. A model from `LLM_HF_REPO` that is not downloaded yet starts on llama.cpp, because ik_llama.cpp cannot download by repository name. When the model answers, the server restarts on ik_llama.cpp. During this one restart, requests get a 503. The server finds the downloaded file by the tag of `LLM_HF_REPO` (`q4_k_m` without a tag). If no file name in the cache contains the tag, the model stays on llama.cpp, and the log names the cause.
+If ik_llama.cpp fails to start twice in a row, or stops within two minutes of a start twice in a row, llama.cpp runs the model until the next start of the container. ik_llama.cpp binds its port without `SO_REUSEADDR`. After a stop of llama-server, the connections that it closed stay in FIN_WAIT2 or TIME_WAIT on port 8081 for up to 60 s, and ik_llama.cpp exits with "couldn't bind to server socket". So before each start of ik_llama.cpp, the server waits until the port is free, at most 90 s, and the log says so. The hub keeps no idle connections to llama-server, so the hub closes each connection first and the TIME_WAIT is on its side. While llama.cpp loads a model, it closes the connections of its health answers itself. So after the first download of a model, the change to ik_llama.cpp waits about 60 s (60.6 s in a test on 2026-11-23). A model from `LLM_HF_REPO` that is not downloaded yet starts on llama.cpp, because ik_llama.cpp cannot download by repository name. When the model answers, the server restarts on ik_llama.cpp. During this one restart, requests get a 503. The server finds the downloaded file by the tag of `LLM_HF_REPO` (`q4_k_m` without a tag). If no file name in the cache contains the tag, the model stays on llama.cpp, and the log names the cause.
 
 The server hides these differences, so the same settings work with both programs:
 
@@ -226,6 +226,33 @@ With `LLM_AREA_IN_USER=on`, the proxy removes that line from the system message 
 llama-server also keeps earlier prompts in a RAM cache (`--cache-ram`, 8 GiB by default). It is empty after each start. The slot file that the hub restores holds one prompt.
 
 A change of the instructions, the exposed entities or the tools changes the prefix. The next request then processes the new prompt once. To pay that cost in the background, send one request after the change: the Home Assistant automation `llm_prompt_warmup` of the setup repository does this.
+
+Such a request must look like a request of a satellite. Send `POST /api/conversation/process` with both `satellite_id` and `device_id` of a satellite, for example `"device_id": "{{ device_id('assist_satellite.kitchen_assist_satellite') }}"` in a `rest_command`. Home Assistant builds the LLM context only from `device_id` (`ConversationInput.as_llm_context` in Home Assistant 2026.11). Without it, the request has no timer tools, the line "This device is not able to start timers." and a general sentence about areas instead of "You are in area ...". With LFM3, the 8 timer tools are 943 tokens in the middle of the tools. So a warm-up without `device_id` fills a prompt that no satellite sends, and the next spoken request processes the whole prompt (7,342 tokens in 18.9 s on an i9-13900K, measured on 2026-11-23). All satellites must support timers to share one prompt: an ESPHome satellite registers timer support when it connects.
+
+## Deferred tools (LFM3, off by default)
+
+With `LLM_DEFER_TOOLS=on` and `LLM_FAMILY=lfm3`, the proxy leaves some Home Assistant tools out of the prompt: the timers (`intent__Hass*Timer*`), the media player controls (`media_player__Hass*`) and the broadcast (`assist_satellite__HassBroadcast`). The prompt of the test home then has 5,241 instead of 7,309 tokens, so a full prefill after a change of the prompt takes about 20 % less time: 28.1 s instead of 35.7 s for the first request with LFM3-1.7B Q4_K_M on ik_llama.cpp and 8 threads of a Core Ultra 7 270K (2026-11-23). A request with a cached prompt is not faster. The setting costs accuracy, see the measurements below, so keep it off unless a full prefill is too slow on your hardware. A comma list of name patterns with `*` replaces the default patterns.
+
+LFM3 supports deferred tools: a tool with `defer_loading` stays out of the system prompt, and when a search tool returns its name, the chat template writes its definition into the tool result. The cached start of the prompt does not change. The proxy (`src/llm/defer.rs`) does this for Home Assistant, which knows nothing about it:
+
+1. Every tool stays in `tools`, so llama-server knows the names. A deferred tool gets `defer_loading`, which llama.cpp honors since PR 31256. ik_llama.cpp drops that field, so its name also goes into `chat_template_kwargs.deferred_tools`, and a second patch of the chat template hides those tools on both engines (`src/llm/template.rs`).
+2. The proxy adds the tool `search_tools`, removes the deferred names from Home Assistant's instruction lines, and adds one paragraph to the system message: what the deferred tools do, and "If none of your listed tools can handle a request, call search_tools to find one, then call the tool that it returns." The wording follows the guide of Liquid AI.
+3. When the model calls `search_tools`, the proxy answers it. It matches the words of the query against the names and descriptions of the deferred tools (with a few spoken words like "louder" and "skip"), sends the five best definitions as the tool result in an `<additional_tools>` block, and asks the model again. Home Assistant gets only the final reply. At most 2 searches run for one reply.
+4. Home Assistant sends the deferred tool call back without the search step. The proxy keeps the last 64 search steps under the ID of the tool call that followed them and puts each one back into later requests, so the history matches the cache.
+
+Measured on 2026-11-23 with LFM3-1.7B Q8_0 on llama.cpp, a Radeon RX 9070 XT (Vulkan, `-fa off`), temperature 0.1, through the proxy of `assistant-hub`: `assistant-hub eval llm --fixture home-assistant --repeat 3`. The set `home-assistant` has the 29 built-in tools of Home Assistant 2026.11, two scripts and a generic house. The second test used the same 59 questions with the system prompt and the 38 tools of a real home (not in the repository). A question counts as correct if the model calls the right tool with the right arguments and then gives an answer.
+
+| Questions (3 runs each) | Generic house, all tools | Generic house, deferred | Real home, all tools | Real home, deferred |
+|---|---|---|---|---|
+| 14 media controls | 12 of 42 | 22 of 42 | 16 of 42 | 12 of 42 |
+| 10 timers | 9 of 30 | 17 of 30 | 10 of 30 | 14 of 30 |
+| 4 broadcasts | 9 of 12 | 5 of 12 | 9 of 12 | 3 of 12 |
+| 31 other questions (lights, states, lists, weather, web search, music, small talk) | 70 of 93 | 68 of 93 | 77 of 93 | 74 of 93 |
+| All | 100 of 177 | 112 of 177 | 112 of 177 | 103 of 177 |
+| First request (whole prompt) | 3.3 s | 2.1 s | 6.4 s | 1.9 s |
+| Median of the other questions | 1.2 s | 1.1 s | 1.0 s | 1.0 s |
+
+The effect depends on the prompt. Timers were better with deferred tools in both tests, and broadcasts were worse in both. In the real home, deferred tools gave 9 correct answers less. Without deferred tools, many failures are loops: the model calls the right tool again after its result, four times in a row. In Home Assistant, that runs the action four times. With deferred tools, LFM3-1.7B often calls a listed tool that sounds similar (`play_music`, `search_media`) instead of a search. A request that searches takes one more model step. If the model searches a third time in one reply, the proxy passes that search call on to Home Assistant, which answers it with an error. Home Assistant answers timers, pause, next and volume with its local intents before the LLM, if "Prefer handling commands locally" is on.
 
 ## Speed settings per family
 

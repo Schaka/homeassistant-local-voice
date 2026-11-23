@@ -12,10 +12,16 @@
 //! where it decides which tool to call. docs/llm.md has the measured effect
 //! on the time per question.
 //!
+//! A second patch is for `LLM_DEFER_TOOLS` (`defer.rs`). The LFM3 template
+//! leaves a tool with `defer_loading` out of the system prompt. ik_llama.cpp
+//! drops that field before it renders the template, so the patch also leaves
+//! out each tool whose name is in `chat_template_kwargs.deferred_tools`. Both
+//! engines pass these arguments to the template.
+//!
 //! The server reads the template from the GGUF file at each start and applies
-//! the patch there, so a new upstream template is used as soon as it ships. If
-//! the patched line is not found, the original template is used and a warning
-//! names the model.
+//! the patches there, so a new upstream template is used as soon as it ships.
+//! If a patched line is not found, that patch is skipped and a warning names
+//! the model.
 
 use crate::config::Family;
 
@@ -40,6 +46,23 @@ fn patch_for(family: Family) -> Option<(&'static str, &'static str)> {
         ),
         Family::Qwen35 | Family::Granite4 => return None,
     })
+}
+
+/// The line of the LFM3 template that decides if a tool is deferred, and the
+/// same line that also reads `deferred_tools`.
+const LFM3_DEFERRED: (&str, &str) = (
+    "{%- set _dyn = (fn.defer_loading is defined and fn.defer_loading) or (tool.defer_loading is defined and tool.defer_loading) -%}",
+    "{%- set _dyn = (fn.defer_loading is defined and fn.defer_loading) or (tool.defer_loading is defined and tool.defer_loading) \
+     or (deferred_tools is defined and fn.name in deferred_tools) -%}",
+);
+
+/// Applies the patch for deferred tools to an LFM3 template.
+pub fn patch_deferred(template: &str) -> Outcome {
+    let (find, replace) = LFM3_DEFERRED;
+    match template.matches(find).count() {
+        1 => Outcome::Patched(template.replacen(find, replace, 1)),
+        n => Outcome::NoMatch(n),
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -92,6 +115,20 @@ mod tests {
             assert!(tool < think_open, "{family:?}: the tool branch must come first:\n{p}");
             assert_eq!(p.matches("role == ").count(), 1, "{family:?}");
         }
+    }
+
+    #[test]
+    fn the_deferred_patch_reads_the_template_argument() {
+        let line = LFM3_DEFERRED.0;
+        let t = format!("{{%- for tool in tools -%}}\n    {line}\n{{%- endfor -%}}");
+        let Outcome::Patched(p) = patch_deferred(&t) else {
+            panic!("no match")
+        };
+        assert!(
+            p.contains("or (deferred_tools is defined and fn.name in deferred_tools) -%}"),
+            "{p}"
+        );
+        assert_eq!(patch_deferred(LFM3), Outcome::NoMatch(0));
     }
 
     #[test]

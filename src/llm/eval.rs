@@ -1,7 +1,11 @@
 //! Evaluation of a conversation agent: `assistant-hub eval llm`.
 //!
 //! The questions in `src/llm/assist.json` are what Home Assistant's Assist
-//! asks: an action, a state, the weather, a web search, small talk. Each
+//! asks: an action, a state, the weather, a web search, small talk. The set
+//! `home-assistant` (`src/llm/assist-ha.json`) has the 29 built-in tools of
+//! Home Assistant 2026.11 with their real names and schemas, a generic house
+//! and 59 questions for each kind of tool. It measures `LLM_DEFER_TOOLS`,
+//! because the patterns of that setting match these names. Each
 //! question has a scripted tool result, so the run needs only the model and
 //! the same input for every engine. The history goes back to the model the way
 //! Home Assistant sends it: the text and the tool calls of earlier answers, but
@@ -22,6 +26,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 const FIXTURE: &str = include_str!("assist.json");
+const FIXTURE_HA: &str = include_str!("assist-ha.json");
 
 /// Rounds of tool calls per question before the run gives up.
 const MAX_ROUNDS: usize = 4;
@@ -36,6 +41,9 @@ pub struct ToolDef {
 #[derive(Debug, Clone, Deserialize)]
 pub struct ToolExpect {
     pub name: String,
+    /// Other tools that count as the right call.
+    #[serde(default)]
+    pub or: Vec<String>,
     /// Argument name and a text that its value must contain (any case).
     #[serde(default)]
     pub args: BTreeMap<String, String>,
@@ -74,6 +82,9 @@ pub struct Fixture {
     pub version: u32,
     pub system: String,
     pub filler_devices: usize,
+    /// Tool results for the questions that have none of their own.
+    #[serde(default)]
+    pub default_results: BTreeMap<String, String>,
     pub tools: Vec<ToolDef>,
     pub questions: Vec<Question>,
 }
@@ -81,6 +92,18 @@ pub struct Fixture {
 impl Fixture {
     pub fn builtin() -> Result<Self> {
         serde_json::from_str(FIXTURE).context("src/llm/assist.json")
+    }
+
+    /// `assist` (the default set), `home-assistant`, or the path of a fixture file.
+    pub fn load(name: &str) -> Result<Self> {
+        match name {
+            "assist" => Self::builtin(),
+            "home-assistant" => serde_json::from_str(FIXTURE_HA).context("src/llm/assist-ha.json"),
+            path => {
+                let text = std::fs::read_to_string(path).with_context(|| format!("cannot read {path}"))?;
+                serde_json::from_str(&text).with_context(|| format!("{path} is no fixture"))
+            }
+        }
     }
 
     /// The system prompt: the house, plus filler sensors so the prompt is as
@@ -305,8 +328,10 @@ fn check_tools(q: &Question, calls: &[(String, Value)]) -> Vec<String> {
         }
     }
     match &q.tool {
-        Some(want) => match calls.iter().find(|(n, _)| *n == want.name) {
+        Some(want) => match calls.iter().find(|(n, _)| *n == want.name || want.or.contains(n)) {
             None => reasons.push(format!("did not call {}", want.name)),
+            // An other tool that counts carries other arguments.
+            Some((n, _)) if *n != want.name => {}
             Some((_, args)) => {
                 for (key, text) in &want.args {
                     let value = match &args[key] {
@@ -440,7 +465,12 @@ async fn run_question(
             let id = call["id"]
                 .as_str()
                 .map_or_else(|| format!("call_{rounds}_{i}"), str::to_owned);
-            let result = q.results.get(&name).cloned().unwrap_or_else(|| "ok".to_owned());
+            let result = q
+                .results
+                .get(&name)
+                .or_else(|| fx.default_results.get(&name))
+                .cloned()
+                .unwrap_or_else(|| "ok".to_owned());
             messages.push(json!({"role": "tool", "tool_call_id": id, "content": result}));
             calls.push((name, args));
         }
@@ -688,16 +718,42 @@ mod tests {
     }
 
     #[test]
-    fn the_builtin_fixture_is_consistent() {
-        let fx = Fixture::builtin().unwrap();
+    fn an_other_tool_in_the_list_counts_as_the_right_call() {
+        let q = question(json!({"id": "c", "text": "cancel my timer",
+            "tool": {"name": "HassCancelTimer", "or": ["HassCancelAllTimers"], "args": {"name": "pizza"}}}));
+        assert!(check_tools(&q, &[("HassCancelAllTimers".into(), json!({}))]).is_empty());
+        assert_eq!(
+            check_tools(&q, &[("HassCancelTimer".into(), json!({"name": "tea"}))]),
+            ["argument name=\"tea\" lacks \"pizza\""]
+        );
+        assert_eq!(
+            check_tools(&q, &[("HassTurnOn".into(), json!({}))]),
+            ["did not call HassCancelTimer"]
+        );
+    }
+
+    #[test]
+    fn the_builtin_fixtures_are_consistent() {
+        for set in ["assist", "home-assistant"] {
+            check_fixture(&Fixture::load(set).unwrap());
+        }
+    }
+
+    fn check_fixture(fx: &Fixture) {
         let names: Vec<&str> = fx.tools.iter().map(|t| t.name.as_str()).collect();
+        for tool in fx.default_results.keys() {
+            assert!(
+                names.contains(&tool.as_str()),
+                "default result of the unknown tool {tool}"
+            );
+        }
         let mut ids = std::collections::BTreeSet::new();
         for q in &fx.questions {
             assert!(ids.insert(q.id.clone()), "duplicate id {}", q.id);
             let mentioned = q
                 .tool
                 .iter()
-                .map(|t| &t.name)
+                .flat_map(|t| std::iter::once(&t.name).chain(&t.or))
                 .chain(&q.allow_tools)
                 .chain(&q.forbid_tools)
                 .chain(q.results.keys());
@@ -706,7 +762,7 @@ mod tests {
             }
             if let Some(t) = &q.tool {
                 assert!(
-                    q.results.contains_key(&t.name),
+                    q.results.contains_key(&t.name) || fx.default_results.contains_key(&t.name),
                     "{}: no scripted result for {}",
                     q.id,
                     t.name

@@ -1,6 +1,7 @@
 //! The optional conversation agent: llama-server as a child process on an
 //! internal port, reached through `/llm/...` on the main port.
 
+pub mod defer;
 pub mod engine;
 pub mod eval;
 #[cfg(test)]
@@ -155,8 +156,9 @@ pub fn cached_gguf(cache_dir: &Path, repo: &str) -> Option<PathBuf> {
     found.pop()
 }
 
-/// Reads the chat template from the model file, patches it for the family and
-/// writes it next to the prompt cache. None: no patch needed or possible.
+/// Reads the chat template from the model file, applies the patches of the
+/// configuration and writes it to the temporary folder. None: no patch needed
+/// or possible.
 fn patched_template(cfg: &LlmConfig, model: &Path) -> Option<PathBuf> {
     let original = match crate::gguf::metadata_string(model, "tokenizer.chat_template") {
         Ok(Some(t)) => t,
@@ -172,31 +174,47 @@ fn patched_template(cfg: &LlmConfig, model: &Path) -> Option<PathBuf> {
             return None;
         }
     };
-    match template::patch(cfg.family, &original) {
-        template::Outcome::NotNeeded => None,
-        template::Outcome::NoMatch(n) => {
-            tracing::warn!(
+    let mut current = original;
+    let mut done: Vec<&str> = Vec::new();
+    if cfg.template_fix {
+        match template::patch(cfg.family, &current) {
+            template::Outcome::NotNeeded => {}
+            template::Outcome::NoMatch(n) => tracing::warn!(
                 "the chat template of {} changed upstream ({n} matches instead of 1): it is used without the \
                  tool-result fix, answers after a tool call may be slow or empty",
                 model.display()
-            );
-            None
-        }
-        template::Outcome::Patched(t) => {
-            let path = std::env::temp_dir().join(format!("chat-template-{}.jinja", cfg.model_name));
-            match std::fs::write(&path, t) {
-                Ok(()) => {
-                    tracing::info!(
-                        "chat template of {} patched: no new thinking after a tool result",
-                        model.display()
-                    );
-                    Some(path)
-                }
-                Err(err) => {
-                    tracing::warn!("cannot write {}: {err}", path.display());
-                    None
-                }
+            ),
+            template::Outcome::Patched(t) => {
+                current = t;
+                done.push("no new thinking after a tool result");
             }
+        }
+    }
+    if !cfg.defer_tools.is_empty() {
+        match template::patch_deferred(&current) {
+            template::Outcome::Patched(t) => {
+                current = t;
+                done.push("deferred tools stay out of the prompt");
+            }
+            template::Outcome::NoMatch(_) | template::Outcome::NotNeeded => tracing::warn!(
+                "the chat template of {} has no line for deferred tools: ik_llama.cpp shows every tool, \
+                 only llama.cpp hides the deferred ones",
+                model.display()
+            ),
+        }
+    }
+    if done.is_empty() {
+        return None;
+    }
+    let path = std::env::temp_dir().join(format!("chat-template-{}.jinja", cfg.model_name));
+    match std::fs::write(&path, current) {
+        Ok(()) => {
+            tracing::info!("chat template of {} patched: {}", model.display(), done.join(", "));
+            Some(path)
+        }
+        Err(err) => {
+            tracing::warn!("cannot write {}: {err}", path.display());
+            None
         }
     }
 }
@@ -235,12 +253,13 @@ pub fn model_file(cfg: &LlmConfig) -> Option<PathBuf> {
     }
 }
 
-/// The patched chat template of the model, if the fix is on and applies.
+/// The patched chat template of the model, if a patch is on and applies.
 fn template_for(cfg: &LlmConfig, model_file: Option<&Path>) -> Option<PathBuf> {
-    match (model_file, cfg.template_fix) {
+    let wanted = cfg.template_fix || !cfg.defer_tools.is_empty();
+    match (model_file, wanted) {
         (Some(file), true) => patched_template(cfg, file),
         (None, true) => {
-            tracing::info!("the model is not downloaded yet: the chat template fix applies from the next start");
+            tracing::info!("the model is not downloaded yet: the chat template patches apply from the next start");
             None
         }
         (_, false) => None,

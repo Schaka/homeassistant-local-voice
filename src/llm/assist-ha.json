@@ -1,0 +1,1671 @@
+{
+ "version": 1,
+ "system": "You are the voice assistant of this home. A text-to-speech engine reads every reply aloud.\nAnswer in one short sentence. Use plain spoken words: no markdown, no lists, no emoji.\nFloors and their areas: Ground Floor: Kitchen, Living Room, Hallway, Garden. First Floor: Bedroom, Office, Bathroom.\nYour own knowledge is old. For news, sports results, prices or anything else that can change, always call web_search first.\nWhen controlling Home Assistant always call the intent tools. Use HassTurnOn to lock and HassTurnOff to unlock a lock. When controlling a device, prefer passing just name and domain. When controlling an area, prefer passing just area name and domain.\nYou are in area Living Room (floor Ground Floor) and all generic commands like 'turn on the lights' should target this area.\nFollow these instructions for tools from \"assist\" (assist_satellite__HassBroadcast, homeassistant__GetLiveContext, intent__HassTurnOn, intent__HassTurnOff, intent__HassStartTimer, intent__HassCancelTimer, intent__HassCancelAllTimers, intent__HassIncreaseTimer, intent__HassDecreaseTimer, intent__HassPauseTimer, intent__HassUnpauseTimer, intent__HassTimerStatus, light__HassLightSet, llm__GetDateTime, media_player__HassMediaUnpause, media_player__HassMediaPause, media_player__HassMediaNext, media_player__HassMediaPrevious, media_player__HassSetVolume, media_player__HassSetVolumeRelative, media_player__HassMediaPlayerMute, media_player__HassMediaPlayerUnmute, media_player__search_media, media_player__play_media, todo__get_items, todo__HassListAddItem, todo__HassListCompleteItem, todo__HassListRemoveItem, script__weather_forecast, script__play_music):\nYou ARE equipped to answer questions about the current state of\nthe home by retrieving live context. This is a primary function. Do not state you lack the\nfunctionality if the question requires live data.\nIf the user asks about device existence/type (e.g., \"Do I have lights in the bedroom?\"): Answer\nfrom the static context below.\nIf the user asks about the CURRENT state, value, or mode (e.g., \"Is the lock locked?\",\n\"Is the fan on?\", \"What mode is the thermostat in?\", \"What is the temperature outside?\"):\n    1.  Recognize this requires live data.\n    2.  You MUST use the provided tool to retrieve live context. This tool will provide the needed real-time information (like temperature from the local weather, lock status, etc.).\n    3.  Use the tool's response to answer the user accurately, stating the actual value or state it returned.\nFor general knowledge questions not about the home: Answer truthfully from internal knowledge.\n\nStatic Context: An overview of the areas and the devices in this smart home:\n- names: Kitchen Light\n  domain: light\n  areas: Kitchen\n- names: Kitchen Speaker\n  domain: media_player\n  areas: Kitchen\n- names: Living Room Light\n  domain: light\n  areas: Living Room\n- names: Living Room Lamp\n  domain: light\n  areas: Living Room\n- names: Living Room TV\n  domain: media_player\n  areas: Living Room\n- names: Living Room Speaker\n  domain: media_player\n  areas: Living Room\n- names: Bedroom Light\n  domain: light\n  areas: Bedroom\n- names: Bedroom TV\n  domain: media_player\n  areas: Bedroom\n- names: Office Light\n  domain: light\n  areas: Office\n- names: Hallway Light\n  domain: light\n  areas: Hallway\n- names: Bathroom Light\n  domain: light\n  areas: Bathroom\n- names: Front Door\n  domain: lock\n  areas: Hallway\n- names: Bedroom Temperature\n  domain: sensor\n  areas: Bedroom\n- names: Bathroom Humidity\n  domain: sensor\n  areas: Bathroom\n- names: Living Room Temperature\n  domain: sensor\n  areas: Living Room\n- names: Outside Temperature\n  domain: sensor\n  areas: Garden\n- names: Garden Lights\n  domain: light\n  areas: Garden\n- names: Dehumidifier Plug\n  domain: switch\n  areas: Bathroom\n- names: Shopping list\n  domain: todo\n\nFollow these instructions for tools from \"web-search\" (web_search):\nThe following tools are available from a remote server named web-search.",
+ "filler_devices": 0,
+ "default_results": {
+  "homeassistant__GetLiveContext": "Live Context: An overview of the areas and the devices in this smart home:\n- names: Bedroom Temperature\n  domain: sensor\n  state: '19.5'\n  attributes:\n    unit_of_measurement: °C\n- names: Bathroom Humidity\n  domain: sensor\n  state: '61'\n  attributes:\n    unit_of_measurement: '%'\n- names: Outside Temperature\n  domain: sensor\n  state: '4.0'\n  attributes:\n    unit_of_measurement: °C\n- names: Front Door\n  domain: lock\n  state: locked\n- names: Kitchen Light\n  domain: light\n  state: 'off'\n- names: Living Room Lamp\n  domain: light\n  state: 'on'\n- names: Living Room Speaker\n  domain: media_player\n  state: playing",
+  "todo__get_items": "{\"action\": \"get_items\", \"todo_list\": \"Shopping list\", \"items\": [{\"summary\": \"eggs\", \"status\": \"needs_action\"}, {\"summary\": \"bread\", \"status\": \"needs_action\"}]}",
+  "script__weather_forecast": "{\"forecast_for\": \"tomorrow, Tuesday 24 November\", \"condition\": \"rain in the afternoon\", \"high_c\": 7, \"low_c\": 2}",
+  "web_search": "Search results from today: 1. Argentina won the 2026 FIFA World Cup final against Spain. 2. SpaceX launched Starship flight 14 on Monday.",
+  "llm__GetDateTime": "{\"date\": \"2026-11-23\", \"time\": \"21:40:00\", \"weekday\": \"Monday\"}",
+  "intent__HassTimerStatus": "{\"speech\": {\"plain\": {\"speech\": \"4 minutes left on the timer\"}}, \"response_type\": \"action_done\", \"data\": {\"success\": [], \"failed\": []}}",
+  "assist_satellite__HassBroadcast": "{\"speech\": {}, \"response_type\": \"action_done\", \"data\": {\"success\": [{\"name\": \"Home\", \"type\": \"entity\", \"id\": \"x\"}], \"failed\": []}}",
+  "intent__HassTurnOn": "{\"speech\": {}, \"response_type\": \"action_done\", \"data\": {\"success\": [{\"name\": \"Home\", \"type\": \"entity\", \"id\": \"x\"}], \"failed\": []}}",
+  "intent__HassTurnOff": "{\"speech\": {}, \"response_type\": \"action_done\", \"data\": {\"success\": [{\"name\": \"Home\", \"type\": \"entity\", \"id\": \"x\"}], \"failed\": []}}",
+  "intent__HassStartTimer": "{\"speech\": {}, \"response_type\": \"action_done\", \"data\": {\"success\": [{\"name\": \"Timer\", \"type\": \"entity\", \"id\": \"x\"}], \"failed\": []}}",
+  "intent__HassCancelTimer": "{\"speech\": {}, \"response_type\": \"action_done\", \"data\": {\"success\": [{\"name\": \"Timer\", \"type\": \"entity\", \"id\": \"x\"}], \"failed\": []}}",
+  "intent__HassCancelAllTimers": "{\"speech\": {}, \"response_type\": \"action_done\", \"data\": {\"success\": [{\"name\": \"Timer\", \"type\": \"entity\", \"id\": \"x\"}], \"failed\": []}}",
+  "intent__HassIncreaseTimer": "{\"speech\": {}, \"response_type\": \"action_done\", \"data\": {\"success\": [{\"name\": \"Timer\", \"type\": \"entity\", \"id\": \"x\"}], \"failed\": []}}",
+  "intent__HassDecreaseTimer": "{\"speech\": {}, \"response_type\": \"action_done\", \"data\": {\"success\": [{\"name\": \"Timer\", \"type\": \"entity\", \"id\": \"x\"}], \"failed\": []}}",
+  "intent__HassPauseTimer": "{\"speech\": {}, \"response_type\": \"action_done\", \"data\": {\"success\": [{\"name\": \"Timer\", \"type\": \"entity\", \"id\": \"x\"}], \"failed\": []}}",
+  "intent__HassUnpauseTimer": "{\"speech\": {}, \"response_type\": \"action_done\", \"data\": {\"success\": [{\"name\": \"Timer\", \"type\": \"entity\", \"id\": \"x\"}], \"failed\": []}}",
+  "light__HassLightSet": "{\"speech\": {}, \"response_type\": \"action_done\", \"data\": {\"success\": [{\"name\": \"Home\", \"type\": \"entity\", \"id\": \"x\"}], \"failed\": []}}",
+  "media_player__HassMediaUnpause": "{\"speech\": {}, \"response_type\": \"action_done\", \"data\": {\"success\": [{\"name\": \"Living Room Speaker\", \"type\": \"entity\", \"id\": \"x\"}], \"failed\": []}}",
+  "media_player__HassMediaPause": "{\"speech\": {}, \"response_type\": \"action_done\", \"data\": {\"success\": [{\"name\": \"Living Room Speaker\", \"type\": \"entity\", \"id\": \"x\"}], \"failed\": []}}",
+  "media_player__HassMediaNext": "{\"speech\": {}, \"response_type\": \"action_done\", \"data\": {\"success\": [{\"name\": \"Living Room Speaker\", \"type\": \"entity\", \"id\": \"x\"}], \"failed\": []}}",
+  "media_player__HassMediaPrevious": "{\"speech\": {}, \"response_type\": \"action_done\", \"data\": {\"success\": [{\"name\": \"Living Room Speaker\", \"type\": \"entity\", \"id\": \"x\"}], \"failed\": []}}",
+  "media_player__HassSetVolume": "{\"speech\": {}, \"response_type\": \"action_done\", \"data\": {\"success\": [{\"name\": \"Living Room Speaker\", \"type\": \"entity\", \"id\": \"x\"}], \"failed\": []}}",
+  "media_player__HassSetVolumeRelative": "{\"speech\": {}, \"response_type\": \"action_done\", \"data\": {\"success\": [{\"name\": \"Living Room Speaker\", \"type\": \"entity\", \"id\": \"x\"}], \"failed\": []}}",
+  "media_player__HassMediaPlayerMute": "{\"speech\": {}, \"response_type\": \"action_done\", \"data\": {\"success\": [{\"name\": \"Living Room Speaker\", \"type\": \"entity\", \"id\": \"x\"}], \"failed\": []}}",
+  "media_player__HassMediaPlayerUnmute": "{\"speech\": {}, \"response_type\": \"action_done\", \"data\": {\"success\": [{\"name\": \"Living Room Speaker\", \"type\": \"entity\", \"id\": \"x\"}], \"failed\": []}}",
+  "media_player__search_media": "{\"speech\": {}, \"response_type\": \"action_done\", \"data\": {\"success\": [{\"name\": \"Living Room Speaker\", \"type\": \"entity\", \"id\": \"x\"}], \"failed\": []}}",
+  "media_player__play_media": "{\"speech\": {}, \"response_type\": \"action_done\", \"data\": {\"success\": [{\"name\": \"Living Room Speaker\", \"type\": \"entity\", \"id\": \"x\"}], \"failed\": []}}",
+  "todo__HassListAddItem": "{\"speech\": {}, \"response_type\": \"action_done\", \"data\": {\"success\": [{\"name\": \"Home\", \"type\": \"entity\", \"id\": \"x\"}], \"failed\": []}}",
+  "todo__HassListCompleteItem": "{\"speech\": {}, \"response_type\": \"action_done\", \"data\": {\"success\": [{\"name\": \"Home\", \"type\": \"entity\", \"id\": \"x\"}], \"failed\": []}}",
+  "todo__HassListRemoveItem": "{\"speech\": {}, \"response_type\": \"action_done\", \"data\": {\"success\": [{\"name\": \"Home\", \"type\": \"entity\", \"id\": \"x\"}], \"failed\": []}}",
+  "script__play_music": "{\"speech\": {}, \"response_type\": \"action_done\", \"data\": {\"success\": [{\"name\": \"Home\", \"type\": \"entity\", \"id\": \"x\"}], \"failed\": []}}"
+ },
+ "tools": [
+  {
+   "name": "assist_satellite__HassBroadcast",
+   "description": "Broadcast a message through the home",
+   "parameters": {
+    "additionalProperties": false,
+    "properties": {
+     "message": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "message"
+    ],
+    "type": "object"
+   }
+  },
+  {
+   "name": "homeassistant__GetLiveContext",
+   "description": "Provides real-time information about the CURRENT state, value, or mode of devices, sensors, entities, or areas. Use this tool for: 1. Answering questions about current conditions (e.g., 'Is the light on?'). 2. As the first step in conditional actions (e.g., 'If the weather is rainy, turn off sprinklers' requires checking the weather first). You may filter for devices by name, domain, and area, including combining those filters. Prefer filtering by domain when searching for multiple devices of the same type.",
+   "parameters": {
+    "additionalProperties": false,
+    "properties": {
+     "area": {
+      "description": "Filter entities by area name or alias (case-insensitive).",
+      "type": "string"
+     },
+     "domain": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "items": {
+         "type": "string"
+        },
+        "type": "array"
+       }
+      ],
+      "description": "Filter entities by domain (e.g. 'light', 'sensor'). Accepts a single domain or a list."
+     },
+     "name": {
+      "description": "Filter entities by name or alias (case-insensitive).",
+      "type": "string"
+     }
+    },
+    "type": "object"
+   }
+  },
+  {
+   "name": "intent__HassTurnOn",
+   "description": "Turns on/opens/presses a device or entity. For locks, this performs a 'lock' action. Use for requests like 'turn on', 'activate', 'enable', or 'lock'.",
+   "parameters": {
+    "additionalProperties": false,
+    "properties": {
+     "area": {
+      "type": "string"
+     },
+     "device_class": {
+      "items": {
+       "enum": [
+        "identify",
+        "restart",
+        "update",
+        "awning",
+        "blind",
+        "curtain",
+        "damper",
+        "door",
+        "garage",
+        "gate",
+        "shade",
+        "shutter",
+        "window",
+        "tv",
+        "speaker",
+        "receiver",
+        "projector",
+        "outlet",
+        "switch",
+        "water",
+        "gas"
+       ],
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "domain": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "floor": {
+      "type": "string"
+     },
+     "name": {
+      "type": "string"
+     }
+    },
+    "type": "object"
+   }
+  },
+  {
+   "name": "intent__HassTurnOff",
+   "description": "Turns off/closes a device or entity. For locks, this performs an 'unlock' action. Use for requests like 'turn off', 'deactivate', 'disable', or 'unlock'.",
+   "parameters": {
+    "additionalProperties": false,
+    "properties": {
+     "area": {
+      "type": "string"
+     },
+     "device_class": {
+      "items": {
+       "enum": [
+        "identify",
+        "restart",
+        "update",
+        "awning",
+        "blind",
+        "curtain",
+        "damper",
+        "door",
+        "garage",
+        "gate",
+        "shade",
+        "shutter",
+        "window",
+        "tv",
+        "speaker",
+        "receiver",
+        "projector",
+        "outlet",
+        "switch",
+        "water",
+        "gas"
+       ],
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "domain": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "floor": {
+      "type": "string"
+     },
+     "name": {
+      "type": "string"
+     }
+    },
+    "type": "object"
+   }
+  },
+  {
+   "name": "intent__HassStartTimer",
+   "description": "Starts a new timer",
+   "parameters": {
+    "additionalProperties": false,
+    "anyOf": [
+     {
+      "required": [
+       "hours"
+      ]
+     },
+     {
+      "required": [
+       "minutes"
+      ]
+     },
+     {
+      "required": [
+       "seconds"
+      ]
+     }
+    ],
+    "properties": {
+     "conversation_command": {
+      "type": "string"
+     },
+     "hours": {
+      "minimum": 0,
+      "type": "integer"
+     },
+     "minutes": {
+      "minimum": 0,
+      "type": "integer"
+     },
+     "name": {
+      "type": "string"
+     },
+     "seconds": {
+      "minimum": 0,
+      "type": "integer"
+     }
+    },
+    "type": "object"
+   }
+  },
+  {
+   "name": "intent__HassCancelTimer",
+   "description": "Cancels a timer",
+   "parameters": {
+    "additionalProperties": false,
+    "properties": {
+     "area": {
+      "type": "string"
+     },
+     "name": {
+      "type": "string"
+     },
+     "start_hours": {
+      "minimum": 0,
+      "type": "integer"
+     },
+     "start_minutes": {
+      "minimum": 0,
+      "type": "integer"
+     },
+     "start_seconds": {
+      "minimum": 0,
+      "type": "integer"
+     }
+    },
+    "type": "object"
+   }
+  },
+  {
+   "name": "intent__HassCancelAllTimers",
+   "description": "Cancels all timers",
+   "parameters": {
+    "additionalProperties": false,
+    "properties": {
+     "area": {
+      "type": "string"
+     }
+    },
+    "type": "object"
+   }
+  },
+  {
+   "name": "intent__HassIncreaseTimer",
+   "description": "Adds more time to a timer",
+   "parameters": {
+    "additionalProperties": false,
+    "properties": {
+     "area": {
+      "type": "string"
+     },
+     "hours": {
+      "minimum": 0,
+      "type": "integer"
+     },
+     "minutes": {
+      "minimum": 0,
+      "type": "integer"
+     },
+     "name": {
+      "type": "string"
+     },
+     "seconds": {
+      "minimum": 0,
+      "type": "integer"
+     },
+     "start_hours": {
+      "minimum": 0,
+      "type": "integer"
+     },
+     "start_minutes": {
+      "minimum": 0,
+      "type": "integer"
+     },
+     "start_seconds": {
+      "minimum": 0,
+      "type": "integer"
+     }
+    },
+    "type": "object"
+   }
+  },
+  {
+   "name": "intent__HassDecreaseTimer",
+   "description": "Removes time from a timer",
+   "parameters": {
+    "additionalProperties": false,
+    "anyOf": [
+     {
+      "required": [
+       "hours"
+      ]
+     },
+     {
+      "required": [
+       "minutes"
+      ]
+     },
+     {
+      "required": [
+       "seconds"
+      ]
+     }
+    ],
+    "properties": {
+     "area": {
+      "type": "string"
+     },
+     "hours": {
+      "minimum": 0,
+      "type": "integer"
+     },
+     "minutes": {
+      "minimum": 0,
+      "type": "integer"
+     },
+     "name": {
+      "type": "string"
+     },
+     "seconds": {
+      "minimum": 0,
+      "type": "integer"
+     },
+     "start_hours": {
+      "minimum": 0,
+      "type": "integer"
+     },
+     "start_minutes": {
+      "minimum": 0,
+      "type": "integer"
+     },
+     "start_seconds": {
+      "minimum": 0,
+      "type": "integer"
+     }
+    },
+    "type": "object"
+   }
+  },
+  {
+   "name": "intent__HassPauseTimer",
+   "description": "Pauses a running timer",
+   "parameters": {
+    "additionalProperties": false,
+    "properties": {
+     "area": {
+      "type": "string"
+     },
+     "name": {
+      "type": "string"
+     },
+     "start_hours": {
+      "minimum": 0,
+      "type": "integer"
+     },
+     "start_minutes": {
+      "minimum": 0,
+      "type": "integer"
+     },
+     "start_seconds": {
+      "minimum": 0,
+      "type": "integer"
+     }
+    },
+    "type": "object"
+   }
+  },
+  {
+   "name": "intent__HassUnpauseTimer",
+   "description": "Resumes a paused timer",
+   "parameters": {
+    "additionalProperties": false,
+    "properties": {
+     "area": {
+      "type": "string"
+     },
+     "name": {
+      "type": "string"
+     },
+     "start_hours": {
+      "minimum": 0,
+      "type": "integer"
+     },
+     "start_minutes": {
+      "minimum": 0,
+      "type": "integer"
+     },
+     "start_seconds": {
+      "minimum": 0,
+      "type": "integer"
+     }
+    },
+    "type": "object"
+   }
+  },
+  {
+   "name": "intent__HassTimerStatus",
+   "description": "Reports the current status of timers",
+   "parameters": {
+    "additionalProperties": false,
+    "properties": {
+     "area": {
+      "type": "string"
+     },
+     "name": {
+      "type": "string"
+     },
+     "start_hours": {
+      "minimum": 0,
+      "type": "integer"
+     },
+     "start_minutes": {
+      "minimum": 0,
+      "type": "integer"
+     },
+     "start_seconds": {
+      "minimum": 0,
+      "type": "integer"
+     }
+    },
+    "type": "object"
+   }
+  },
+  {
+   "name": "light__HassLightSet",
+   "description": "Sets the brightness percentage or color of a light",
+   "parameters": {
+    "additionalProperties": false,
+    "properties": {
+     "area": {
+      "type": "string"
+     },
+     "brightness": {
+      "description": "The brightness percentage of the light between 0 and 100, where 0 is off and 100 is fully lit",
+      "maximum": 100,
+      "minimum": 0,
+      "type": "integer"
+     },
+     "color": {
+      "type": "string"
+     },
+     "domain": {
+      "items": {
+       "enum": [
+        "light"
+       ],
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "floor": {
+      "type": "string"
+     },
+     "name": {
+      "type": "string"
+     },
+     "temperature": {
+      "minimum": 0,
+      "type": "integer"
+     }
+    },
+    "type": "object"
+   }
+  },
+  {
+   "name": "llm__GetDateTime",
+   "description": "Provides the current date and time.",
+   "parameters": {
+    "additionalProperties": false,
+    "properties": {},
+    "type": "object"
+   }
+  },
+  {
+   "name": "media_player__HassMediaUnpause",
+   "description": "Resumes a media player",
+   "parameters": {
+    "additionalProperties": false,
+    "properties": {
+     "area": {
+      "type": "string"
+     },
+     "device_class": {
+      "items": {
+       "enum": [
+        "tv",
+        "speaker",
+        "receiver",
+        "projector"
+       ],
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "domain": {
+      "items": {
+       "enum": [
+        "media_player"
+       ],
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "floor": {
+      "type": "string"
+     },
+     "name": {
+      "type": "string"
+     }
+    },
+    "type": "object"
+   }
+  },
+  {
+   "name": "media_player__HassMediaPause",
+   "description": "Pauses a media player",
+   "parameters": {
+    "additionalProperties": false,
+    "properties": {
+     "area": {
+      "type": "string"
+     },
+     "device_class": {
+      "items": {
+       "enum": [
+        "tv",
+        "speaker",
+        "receiver",
+        "projector"
+       ],
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "domain": {
+      "items": {
+       "enum": [
+        "media_player"
+       ],
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "floor": {
+      "type": "string"
+     },
+     "name": {
+      "type": "string"
+     }
+    },
+    "type": "object"
+   }
+  },
+  {
+   "name": "media_player__HassMediaNext",
+   "description": "Skips a media player to the next item",
+   "parameters": {
+    "additionalProperties": false,
+    "properties": {
+     "area": {
+      "type": "string"
+     },
+     "device_class": {
+      "items": {
+       "enum": [
+        "tv",
+        "speaker",
+        "receiver",
+        "projector"
+       ],
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "domain": {
+      "items": {
+       "enum": [
+        "media_player"
+       ],
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "floor": {
+      "type": "string"
+     },
+     "name": {
+      "type": "string"
+     }
+    },
+    "type": "object"
+   }
+  },
+  {
+   "name": "media_player__HassMediaPrevious",
+   "description": "Replays the previous item for a media player",
+   "parameters": {
+    "additionalProperties": false,
+    "properties": {
+     "area": {
+      "type": "string"
+     },
+     "device_class": {
+      "items": {
+       "enum": [
+        "tv",
+        "speaker",
+        "receiver",
+        "projector"
+       ],
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "domain": {
+      "items": {
+       "enum": [
+        "media_player"
+       ],
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "floor": {
+      "type": "string"
+     },
+     "name": {
+      "type": "string"
+     }
+    },
+    "type": "object"
+   }
+  },
+  {
+   "name": "media_player__HassSetVolume",
+   "description": "Sets the volume percentage of a media player",
+   "parameters": {
+    "additionalProperties": false,
+    "properties": {
+     "area": {
+      "type": "string"
+     },
+     "device_class": {
+      "items": {
+       "enum": [
+        "tv",
+        "speaker",
+        "receiver",
+        "projector"
+       ],
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "domain": {
+      "items": {
+       "enum": [
+        "media_player"
+       ],
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "floor": {
+      "type": "string"
+     },
+     "name": {
+      "type": "string"
+     },
+     "volume_level": {
+      "description": "The volume percentage of the media player",
+      "maximum": 100,
+      "minimum": 0,
+      "type": "integer"
+     }
+    },
+    "required": [
+     "volume_level"
+    ],
+    "type": "object"
+   }
+  },
+  {
+   "name": "media_player__HassSetVolumeRelative",
+   "description": "Increases or decreases the volume of a media player",
+   "parameters": {
+    "additionalProperties": false,
+    "properties": {
+     "area": {
+      "type": "string"
+     },
+     "floor": {
+      "type": "string"
+     },
+     "name": {
+      "type": "string"
+     },
+     "volume_step": {
+      "anyOf": [
+       {
+        "enum": [
+         "up",
+         "down"
+        ],
+        "type": "string"
+       },
+       {
+        "maximum": 100,
+        "minimum": -100,
+        "type": "integer"
+       }
+      ]
+     }
+    },
+    "required": [
+     "volume_step"
+    ],
+    "type": "object"
+   }
+  },
+  {
+   "name": "media_player__HassMediaPlayerMute",
+   "description": "Mutes a media player",
+   "parameters": {
+    "additionalProperties": false,
+    "properties": {
+     "area": {
+      "type": "string"
+     },
+     "device_class": {
+      "items": {
+       "enum": [
+        "tv",
+        "speaker",
+        "receiver",
+        "projector"
+       ],
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "domain": {
+      "items": {
+       "enum": [
+        "media_player"
+       ],
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "floor": {
+      "type": "string"
+     },
+     "is_volume_muted": {
+      "description": "Whether the media player should be muted or unmuted"
+     },
+     "name": {
+      "type": "string"
+     }
+    },
+    "type": "object"
+   }
+  },
+  {
+   "name": "media_player__HassMediaPlayerUnmute",
+   "description": "Unmutes a media player",
+   "parameters": {
+    "additionalProperties": false,
+    "properties": {
+     "area": {
+      "type": "string"
+     },
+     "device_class": {
+      "items": {
+       "enum": [
+        "tv",
+        "speaker",
+        "receiver",
+        "projector"
+       ],
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "domain": {
+      "items": {
+       "enum": [
+        "media_player"
+       ],
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "floor": {
+      "type": "string"
+     },
+     "is_volume_muted": {
+      "description": "Whether the media player should be muted or unmuted"
+     },
+     "name": {
+      "type": "string"
+     }
+    },
+    "type": "object"
+   }
+  },
+  {
+   "name": "media_player__search_media",
+   "description": "Searches a media player for media. Can also search inside a result of an earlier search, such as an artist or an album.",
+   "parameters": {
+    "additionalProperties": false,
+    "properties": {
+     "player_area": {
+      "type": "string"
+     },
+     "player_floor": {
+      "type": "string"
+     },
+     "player_name": {
+      "type": "string"
+     },
+     "search_query": {
+      "description": "What to search for, such as a song, artist or album",
+      "type": "string"
+     },
+     "within_media_content_id": {
+      "description": "The media_content_id of a result to search inside, such as an artist. Copy it from that result.",
+      "type": "string"
+     },
+     "within_media_content_type": {
+      "description": "The media_content_type of the result to search inside. Copy it from that result.",
+      "type": "string"
+     }
+    },
+    "required": [
+     "search_query"
+    ],
+    "type": "object"
+   }
+  },
+  {
+   "name": "media_player__play_media",
+   "description": "Plays a media item that the search media tool returned, or a URL. For a search result, pass the same player_name, player_area and player_floor as the search.",
+   "parameters": {
+    "additionalProperties": false,
+    "properties": {
+     "media_content_id": {
+      "description": "The media_content_id of the search result, or a URL",
+      "type": "string"
+     },
+     "media_content_type": {
+      "description": "The media_content_type of the search result. Use music to play an audio URL.",
+      "type": "string"
+     },
+     "player_area": {
+      "type": "string"
+     },
+     "player_floor": {
+      "type": "string"
+     },
+     "player_name": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "media_content_id",
+     "media_content_type"
+    ],
+    "type": "object"
+   }
+  },
+  {
+   "name": "todo__get_items",
+   "description": "Query a to-do list to find out what items are on it. Use this to answer questions like 'What's on my task list?' or 'Read my grocery list'. Filters items by status (needs_action, completed, all).",
+   "parameters": {
+    "additionalProperties": false,
+    "properties": {
+     "status": {
+      "default": "needs_action",
+      "description": "Filter returned items by status, by default returns incomplete items",
+      "enum": [
+       "needs_action",
+       "completed",
+       "all"
+      ],
+      "type": "string"
+     },
+     "todo_list": {
+      "enum": [
+       "Shopping list"
+      ],
+      "type": "string"
+     }
+    },
+    "required": [
+     "todo_list"
+    ],
+    "type": "object"
+   }
+  },
+  {
+   "name": "todo__HassListAddItem",
+   "description": "Add item to a todo list",
+   "parameters": {
+    "additionalProperties": false,
+    "properties": {
+     "item": {
+      "type": "string"
+     },
+     "name": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "item",
+     "name"
+    ],
+    "type": "object"
+   }
+  },
+  {
+   "name": "todo__HassListCompleteItem",
+   "description": "Complete item on a todo list",
+   "parameters": {
+    "additionalProperties": false,
+    "properties": {
+     "item": {
+      "type": "string"
+     },
+     "name": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "item",
+     "name"
+    ],
+    "type": "object"
+   }
+  },
+  {
+   "name": "todo__HassListRemoveItem",
+   "description": "Remove one or more items from a todo list",
+   "parameters": {
+    "additionalProperties": false,
+    "properties": {
+     "item": {
+      "type": "string"
+     },
+     "name": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "item",
+     "name"
+    ],
+    "type": "object"
+   }
+  },
+  {
+   "name": "script__weather_forecast",
+   "description": "Returns the weather forecast for today, tomorrow or the week, with relative dates.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "day": {
+      "type": "string",
+      "enum": [
+       "today",
+       "tomorrow",
+       "week"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "script__play_music",
+   "description": "Plays music by an artist, album, song, genre or playlist on a speaker of an area.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "query": {
+      "type": "string",
+      "description": "What to play"
+     },
+     "area": {
+      "type": "string",
+      "description": "The area of the speaker"
+     }
+    },
+    "required": [
+     "query"
+    ]
+   }
+  },
+  {
+   "name": "web_search",
+   "description": "Searches the internet. Use it for news, current events, sports results and facts that can change. Your own knowledge is older than these results. For recent events, put the current year in the query. Returns a few short results with their source and date.",
+   "parameters": {
+    "additionalProperties": false,
+    "properties": {
+     "max_results": {
+      "description": "Number of results. Default 3.",
+      "maximum": 5,
+      "minimum": 1,
+      "type": "number"
+     },
+     "query": {
+      "description": "What to search for.",
+      "type": "string"
+     }
+    },
+    "required": [
+     "query"
+    ],
+    "type": "object"
+   }
+  }
+ ],
+ "questions": [
+  {
+   "id": "media-pause",
+   "text": "pause the music",
+   "tool": {
+    "name": "media_player__HassMediaPause",
+    "args": {}
+   },
+   "answer_min_chars": 2
+  },
+  {
+   "id": "media-pause-tv",
+   "text": "pause the tv",
+   "tool": {
+    "name": "media_player__HassMediaPause",
+    "args": {}
+   },
+   "answer_min_chars": 2
+  },
+  {
+   "id": "media-resume",
+   "text": "resume the music",
+   "tool": {
+    "name": "media_player__HassMediaUnpause",
+    "args": {}
+   },
+   "answer_min_chars": 2
+  },
+  {
+   "id": "media-continue",
+   "text": "continue playing",
+   "tool": {
+    "name": "media_player__HassMediaUnpause",
+    "args": {}
+   },
+   "answer_min_chars": 2
+  },
+  {
+   "id": "media-next",
+   "text": "skip this song",
+   "tool": {
+    "name": "media_player__HassMediaNext",
+    "args": {}
+   },
+   "answer_min_chars": 2
+  },
+  {
+   "id": "media-next-track",
+   "text": "next track please",
+   "tool": {
+    "name": "media_player__HassMediaNext",
+    "args": {}
+   },
+   "answer_min_chars": 2
+  },
+  {
+   "id": "media-previous",
+   "text": "play the previous song",
+   "tool": {
+    "name": "media_player__HassMediaPrevious",
+    "args": {}
+   },
+   "answer_min_chars": 2
+  },
+  {
+   "id": "media-back",
+   "text": "go back one song",
+   "tool": {
+    "name": "media_player__HassMediaPrevious",
+    "args": {}
+   },
+   "answer_min_chars": 2
+  },
+  {
+   "id": "volume-up",
+   "text": "make it louder",
+   "tool": {
+    "name": "media_player__HassSetVolumeRelative",
+    "args": {},
+    "or": [
+     "media_player__HassSetVolume"
+    ]
+   },
+   "answer_min_chars": 2
+  },
+  {
+   "id": "volume-down",
+   "text": "turn the volume down a bit",
+   "tool": {
+    "name": "media_player__HassSetVolumeRelative",
+    "args": {},
+    "or": [
+     "media_player__HassSetVolume"
+    ]
+   },
+   "answer_min_chars": 2
+  },
+  {
+   "id": "volume-set",
+   "text": "set the volume to 30 percent",
+   "tool": {
+    "name": "media_player__HassSetVolume",
+    "args": {
+     "volume_level": "30"
+    }
+   },
+   "answer_min_chars": 2
+  },
+  {
+   "id": "volume-set-kitchen",
+   "text": "set the kitchen speaker volume to 50",
+   "tool": {
+    "name": "media_player__HassSetVolume",
+    "args": {
+     "volume_level": "50"
+    }
+   },
+   "answer_min_chars": 2
+  },
+  {
+   "id": "mute-tv",
+   "text": "mute the tv",
+   "tool": {
+    "name": "media_player__HassMediaPlayerMute",
+    "args": {}
+   },
+   "answer_min_chars": 2
+  },
+  {
+   "id": "unmute-speaker",
+   "text": "unmute the speaker",
+   "tool": {
+    "name": "media_player__HassMediaPlayerUnmute",
+    "args": {}
+   },
+   "answer_min_chars": 2
+  },
+  {
+   "id": "play-jazz",
+   "text": "play some jazz",
+   "tool": {
+    "name": "script__play_music",
+    "args": {
+     "query": "jazz"
+    }
+   },
+   "answer_min_chars": 2
+  },
+  {
+   "id": "play-artist-kitchen",
+   "text": "play the beatles in the kitchen",
+   "tool": {
+    "name": "script__play_music",
+    "args": {
+     "query": "beatles",
+     "area": "kitchen"
+    }
+   },
+   "answer_min_chars": 2
+  },
+  {
+   "id": "timer-start",
+   "text": "set a timer for 10 minutes",
+   "tool": {
+    "name": "intent__HassStartTimer",
+    "args": {
+     "minutes": "10"
+    }
+   },
+   "answer_min_chars": 2
+  },
+  {
+   "id": "timer-seconds",
+   "text": "start a 30 second timer",
+   "tool": {
+    "name": "intent__HassStartTimer",
+    "args": {
+     "seconds": "30"
+    }
+   },
+   "answer_min_chars": 2
+  },
+  {
+   "id": "timer-named",
+   "text": "set a pizza timer for 12 minutes",
+   "tool": {
+    "name": "intent__HassStartTimer",
+    "args": {
+     "name": "pizza"
+    }
+   },
+   "answer_min_chars": 2
+  },
+  {
+   "id": "timer-status",
+   "text": "how much time is left on my timer",
+   "tool": {
+    "name": "intent__HassTimerStatus",
+    "args": {}
+   },
+   "answer_min_chars": 2
+  },
+  {
+   "id": "timer-running",
+   "text": "is my timer still running",
+   "tool": {
+    "name": "intent__HassTimerStatus",
+    "args": {}
+   },
+   "answer_min_chars": 2
+  },
+  {
+   "id": "timer-cancel",
+   "text": "cancel my timer",
+   "tool": {
+    "name": "intent__HassCancelTimer",
+    "args": {},
+    "or": [
+     "intent__HassCancelAllTimers"
+    ]
+   },
+   "answer_min_chars": 2
+  },
+  {
+   "id": "timer-cancel-all",
+   "text": "cancel all timers",
+   "tool": {
+    "name": "intent__HassCancelAllTimers",
+    "args": {}
+   },
+   "answer_min_chars": 2
+  },
+  {
+   "id": "timer-add",
+   "text": "add five minutes to my timer",
+   "tool": {
+    "name": "intent__HassIncreaseTimer",
+    "args": {
+     "minutes": "5"
+    }
+   },
+   "answer_min_chars": 2
+  },
+  {
+   "id": "timer-pause",
+   "text": "pause the timer",
+   "tool": {
+    "name": "intent__HassPauseTimer",
+    "args": {}
+   },
+   "answer_min_chars": 2
+  },
+  {
+   "id": "timer-resume",
+   "text": "resume the timer",
+   "tool": {
+    "name": "intent__HassUnpauseTimer",
+    "args": {}
+   },
+   "answer_min_chars": 2
+  },
+  {
+   "id": "broadcast-dinner",
+   "text": "tell everyone that dinner is ready",
+   "tool": {
+    "name": "assist_satellite__HassBroadcast",
+    "args": {
+     "message": "dinner"
+    }
+   },
+   "answer_min_chars": 2
+  },
+  {
+   "id": "broadcast-leave",
+   "text": "announce that we leave in five minutes",
+   "tool": {
+    "name": "assist_satellite__HassBroadcast",
+    "args": {
+     "message": "leave"
+    }
+   },
+   "answer_min_chars": 2
+  },
+  {
+   "id": "broadcast-laundry",
+   "text": "broadcast that the laundry is done",
+   "tool": {
+    "name": "assist_satellite__HassBroadcast",
+    "args": {
+     "message": "laundry"
+    }
+   },
+   "answer_min_chars": 2
+  },
+  {
+   "id": "broadcast-movie",
+   "text": "let the whole house know that the movie starts now",
+   "tool": {
+    "name": "assist_satellite__HassBroadcast",
+    "args": {
+     "message": "movie"
+    }
+   },
+   "answer_min_chars": 2
+  },
+  {
+   "id": "light-on",
+   "text": "turn on the kitchen light",
+   "tool": {
+    "name": "intent__HassTurnOn",
+    "args": {
+     "name": "kitchen"
+    }
+   },
+   "answer_min_chars": 2
+  },
+  {
+   "id": "light-off-area",
+   "text": "turn off the lights in the bedroom",
+   "tool": {
+    "name": "intent__HassTurnOff",
+    "args": {
+     "area": "bedroom"
+    }
+   },
+   "answer_min_chars": 2
+  },
+  {
+   "id": "light-dim",
+   "text": "dim the living room lamp to 30 percent",
+   "tool": {
+    "name": "light__HassLightSet",
+    "args": {
+     "brightness": "30"
+    }
+   },
+   "answer_min_chars": 2
+  },
+  {
+   "id": "light-color",
+   "text": "make the office light blue",
+   "tool": {
+    "name": "light__HassLightSet",
+    "args": {
+     "color": "blue"
+    }
+   },
+   "answer_min_chars": 2
+  },
+  {
+   "id": "light-hallway-off",
+   "text": "switch off the hallway light",
+   "tool": {
+    "name": "intent__HassTurnOff",
+    "args": {
+     "name": "hallway"
+    }
+   },
+   "answer_min_chars": 2
+  },
+  {
+   "id": "garden-on",
+   "text": "turn on the garden lights",
+   "tool": {
+    "name": "intent__HassTurnOn",
+    "args": {
+     "name": "garden"
+    }
+   },
+   "answer_min_chars": 2
+  },
+  {
+   "id": "lock",
+   "text": "lock the front door",
+   "tool": {
+    "name": "intent__HassTurnOn",
+    "args": {
+     "name": "front door"
+    }
+   },
+   "answer_min_chars": 2
+  },
+  {
+   "id": "plug-off",
+   "text": "turn off the dehumidifier plug",
+   "tool": {
+    "name": "intent__HassTurnOff",
+    "args": {
+     "name": "dehumidifier"
+    }
+   },
+   "answer_min_chars": 2
+  },
+  {
+   "id": "state-temp",
+   "text": "what's the temperature in the bedroom",
+   "tool": {
+    "name": "homeassistant__GetLiveContext",
+    "args": {}
+   },
+   "answer_any": [
+    "19"
+   ]
+  },
+  {
+   "id": "state-lock",
+   "text": "is the front door locked",
+   "tool": {
+    "name": "homeassistant__GetLiveContext",
+    "args": {}
+   },
+   "answer_any": [
+    "locked",
+    "yes"
+   ]
+  },
+  {
+   "id": "state-lights",
+   "text": "which lights are on right now",
+   "tool": {
+    "name": "homeassistant__GetLiveContext",
+    "args": {}
+   },
+   "answer_any": [
+    "lamp",
+    "living"
+   ]
+  },
+  {
+   "id": "state-humidity",
+   "text": "what's the humidity in the bathroom",
+   "tool": {
+    "name": "homeassistant__GetLiveContext",
+    "args": {}
+   },
+   "answer_any": [
+    "61"
+   ]
+  },
+  {
+   "id": "state-outside",
+   "text": "how cold is it outside",
+   "tool": {
+    "name": "homeassistant__GetLiveContext",
+    "args": {},
+    "or": [
+     "script__weather_forecast"
+    ]
+   },
+   "answer_min_chars": 2
+  },
+  {
+   "id": "time",
+   "text": "what time is it",
+   "tool": {
+    "name": "llm__GetDateTime",
+    "args": {}
+   },
+   "answer_any": [
+    "21",
+    "9:40",
+    "nine"
+   ]
+  },
+  {
+   "id": "list-read",
+   "text": "what's on my shopping list",
+   "tool": {
+    "name": "todo__get_items",
+    "args": {}
+   },
+   "answer_any": [
+    "eggs",
+    "bread"
+   ]
+  },
+  {
+   "id": "list-add",
+   "text": "add milk to the shopping list",
+   "tool": {
+    "name": "todo__HassListAddItem",
+    "args": {
+     "item": "milk"
+    }
+   },
+   "answer_min_chars": 2
+  },
+  {
+   "id": "list-remove",
+   "text": "remove eggs from the shopping list",
+   "tool": {
+    "name": "todo__HassListRemoveItem",
+    "args": {
+     "item": "eggs"
+    }
+   },
+   "answer_min_chars": 2
+  },
+  {
+   "id": "list-complete",
+   "text": "I bought the bread, check it off the shopping list",
+   "tool": {
+    "name": "todo__HassListCompleteItem",
+    "args": {
+     "item": "bread"
+    }
+   },
+   "answer_min_chars": 2
+  },
+  {
+   "id": "list-ask",
+   "text": "do we have coffee on the shopping list",
+   "tool": {
+    "name": "todo__get_items",
+    "args": {}
+   },
+   "forbid_tools": [
+    "todo__HassListAddItem"
+   ],
+   "answer_min_chars": 2
+  },
+  {
+   "id": "weather-tomorrow",
+   "text": "what's the weather tomorrow",
+   "tool": {
+    "name": "script__weather_forecast",
+    "args": {}
+   },
+   "answer_any": [
+    "rain"
+   ]
+  },
+  {
+   "id": "weather-rain",
+   "text": "will it rain tomorrow",
+   "tool": {
+    "name": "script__weather_forecast",
+    "args": {}
+   },
+   "answer_any": [
+    "yes",
+    "rain"
+   ]
+  },
+  {
+   "id": "weather-week",
+   "text": "what's the weather like this week",
+   "tool": {
+    "name": "script__weather_forecast",
+    "args": {}
+   },
+   "answer_min_chars": 2
+  },
+  {
+   "id": "web-worldcup",
+   "text": "who won the last world cup",
+   "tool": {
+    "name": "web_search",
+    "args": {}
+   },
+   "answer_any": [
+    "argentina"
+   ]
+  },
+  {
+   "id": "web-news",
+   "text": "what's the latest news about spacex",
+   "tool": {
+    "name": "web_search",
+    "args": {}
+   },
+   "answer_any": [
+    "starship"
+   ]
+  },
+  {
+   "id": "chat-joke",
+   "text": "tell me a short joke",
+   "allow_tools": [
+    "web_search"
+   ],
+   "answer_min_chars": 2
+  },
+  {
+   "id": "chat-thanks",
+   "text": "thank you",
+   "answer_min_chars": 2
+  },
+  {
+   "id": "chat-capital",
+   "text": "what is the capital of france",
+   "allow_tools": [
+    "web_search"
+   ],
+   "answer_any": [
+    "paris"
+   ]
+  },
+  {
+   "id": "chat-math",
+   "text": "what is 12 times 12",
+   "answer_any": [
+    "144"
+   ]
+  },
+  {
+   "id": "chat-how",
+   "text": "how are you today",
+   "answer_min_chars": 2
+  }
+ ]
+}

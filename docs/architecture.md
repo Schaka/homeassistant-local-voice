@@ -58,7 +58,7 @@ STT and TTS share one GPU lock, so they never run on the GPU at the same time. T
 | `src/wyoming/` | Wyoming framing and the STT and TTS handler |
 | `src/stt.rs`, `src/tts.rs`, `src/audio.rs`, `src/gpu.rs` | parakeet.cpp binding, audiocpp client and text cleanup, PCM and WAV, GPU detection and GPU lock |
 | `src/denoise.rs` | Hush binding for the optional STT cleanup (`STT_DENOISE`) |
-| `src/llm/` | The engine choice (`engine.rs`) and the spec of the child process for each start (`specs.rs`), the arguments for llama.cpp (`llamacpp.rs`) and ik_llama.cpp (`ik.rs`) with the shared sampling values (`mod.rs`), the proxy, the prompt cache, the evaluation (`eval.rs`), and a fake llama-server for tests (`fake.rs`) |
+| `src/llm/` | The engine choice (`engine.rs`) and the spec of the child process for each start (`specs.rs`), the arguments for llama.cpp (`llamacpp.rs`) and ik_llama.cpp (`ik.rs`) with the shared sampling values (`mod.rs`), the proxy with the deferred tools (`defer.rs`) and the template patches (`template.rs`), the prompt cache, the evaluation (`eval.rs`), and a fake llama-server for tests (`fake.rs`) |
 | `src/search.rs`, `src/youtube.rs`, `src/jellyfin.rs`, `src/mcp.rs` | SearXNG through PyO3, YouTube search, Jellyfin search, MCP |
 | `src/text.rs` | Matching of spoken names against titles, trigram similarity |
 | `build.rs` | Generates the bindings of llama.cpp's C API with bindgen, from the headers of the llama.cpp build in the image |
@@ -79,7 +79,7 @@ STT and TTS share one GPU lock, so they never run on the GPU at the same time. T
 | `assistant-hub verify-gguf FILE...` | Check model files |
 | `assistant-hub healthcheck` | Calls `/health`. Exit code 0 means the answer is 200 and `status` is `ok`. |
 | `assistant-hub llm-command` | Prints the command line of the LLM engine for the current environment as JSON, and prepares its files (chat template, cache folder) |
-| `assistant-hub eval llm [--base-url URL] [--repeat N] [--out FILE]` | Asks the Assist questions of `src/llm/assist.json` and scores the answers. See "Tests" below. |
+| `assistant-hub eval llm [--fixture SET] [--base-url URL] [--repeat N] [--out FILE]` | Asks the Assist questions of a set and scores the answers. `assist` (default, `src/llm/assist.json`) has 12 questions, `home-assistant` (`src/llm/assist-ha.json`) has the built-in tools of Home Assistant and 59 questions, and a path loads a fixture file. See "Tests" below. |
 | `assistant-hub eval compare A.json B.json` | Decides whether engine B may replace engine A. Exit code 1 means no. |
 
 All of them take `--addr host:port` (default `127.0.0.1:10300`). In the container: `docker exec <name> assistant-hub probe describe`.
